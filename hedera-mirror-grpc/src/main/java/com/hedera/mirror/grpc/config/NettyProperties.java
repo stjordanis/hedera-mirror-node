@@ -43,7 +43,7 @@ public class NettyProperties {
     private int bossEventLoopGroupPoolCount = 1;
 
     @Min(8)
-    private int workerEventLoopGroupPoolCount = 100;
+    private int workerEventLoopGroupPoolCount = 1000;
 
     private boolean isNioChannelType = true;
 }
