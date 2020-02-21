@@ -38,4 +38,12 @@ public class NettyProperties {
 
     @Min(8) // 1 kb
     private int maxMetadataSize = 1024;
+
+    @Min(1)
+    private int bossEventLoopGroupPoolCount = 1;
+
+    @Min(8)
+    private int workerEventLoopGroupPoolCount = 100;
+
+    private boolean isNioChannelType = true;
 }

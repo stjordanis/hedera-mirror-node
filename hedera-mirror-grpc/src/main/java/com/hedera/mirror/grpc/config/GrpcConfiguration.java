@@ -21,6 +21,11 @@ package com.hedera.mirror.grpc.config;
  */
 
 import io.grpc.netty.shaded.io.grpc.netty.NettyServerBuilder;
+import io.grpc.netty.shaded.io.netty.channel.EventLoopGroup;
+import io.grpc.netty.shaded.io.netty.channel.epoll.EpollEventLoopGroup;
+import io.grpc.netty.shaded.io.netty.channel.epoll.EpollServerSocketChannel;
+import io.grpc.netty.shaded.io.netty.channel.nio.NioEventLoopGroup;
+import io.grpc.netty.shaded.io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.grpc.services.HealthStatusManager;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -54,10 +59,29 @@ public class GrpcConfiguration {
     @Bean
     public GrpcServerConfigurer grpcServerConfigurer(GrpcProperties grpcProperties) {
         NettyProperties nettyProperties = grpcProperties.getNetty();
+
+        Class channelType;
+        EventLoopGroup bossEventLoopGroup;
+        EventLoopGroup workerEventLoopGroup;
+
+        // specify channel type and eventloop group properties
+        if (nettyProperties.isNioChannelType()) {
+            channelType = NioServerSocketChannel.class;
+            bossEventLoopGroup = new NioEventLoopGroup(nettyProperties.getBossEventLoopGroupPoolCount());
+            workerEventLoopGroup = new NioEventLoopGroup(nettyProperties.getWorkerEventLoopGroupPoolCount());
+        } else {
+            channelType = EpollServerSocketChannel.class;
+            bossEventLoopGroup = new EpollEventLoopGroup(nettyProperties.getBossEventLoopGroupPoolCount());
+            workerEventLoopGroup = new EpollEventLoopGroup(nettyProperties.getWorkerEventLoopGroupPoolCount());
+        }
+
         return serverBuilder -> ((NettyServerBuilder) serverBuilder)
                 .flowControlWindow(nettyProperties.getFlowControlWindow())
                 .maxConcurrentCallsPerConnection(nettyProperties.getMaxConcurrentCallsPerConnection())
                 .maxInboundMessageSize(nettyProperties.getMaxMessageSize())
-                .maxInboundMetadataSize(nettyProperties.getMaxMetadataSize());
+                .maxInboundMetadataSize(nettyProperties.getMaxMetadataSize())
+                .channelType(channelType)
+                .bossEventLoopGroup(bossEventLoopGroup)
+                .workerEventLoopGroup(workerEventLoopGroup);
     }
 }
