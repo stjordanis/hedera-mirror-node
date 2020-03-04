@@ -1,0 +1,428 @@
+[
+  {
+    "name": "consensusTimestamp",
+    "type": "INTEGER",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "transactionType",
+    "type": "INTEGER",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "cudEntityID",
+    "type": "RECORD",
+    "fields": [
+      {
+        "name": "shardNum",
+        "type": "INTEGER",
+        "mode": "REQUIRED"
+      },
+      {
+        "name": "realmNum",
+        "type": "INTEGER",
+        "mode": "REQUIRED"
+      },
+      {
+        "name": "entityNum",
+        "type": "INTEGER",
+        "mode": "REQUIRED"
+      }
+    ]
+  },
+  {
+    "name": "cudEntityType",
+    "type": "INTEGER"
+  },
+  {
+    "name": "transaction",
+    "type": "RECORD",
+    "mode": "REQUIRED",
+    "fields": [
+      {
+        "name": "body",
+        "type": "RECORD",
+        "mode": "REQUIRED",
+        "fields": [
+          {
+            "name": "transactionID",
+            "type": "RECORD",
+            "mode": "REQUIRED",
+            "fields": [
+              {
+                "name": "transactionValidStart",
+                "type": "INTEGER",
+                "mode": "REQUIRED"
+              },
+              {
+                "name": "accountID",
+                "type": "RECORD",
+                "mode": "REQUIRED",
+                "fields": [
+                  {
+                    "name": "shardNum",
+                    "type": "INTEGER",
+                    "mode": "REQUIRED"
+                  },
+                  {
+                    "name": "realmNum",
+                    "type": "INTEGER",
+                    "mode": "REQUIRED"
+                  },
+                  {
+                    "name": "entityNum",
+                    "type": "INTEGER",
+                    "mode": "REQUIRED"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "name": "nodeAccountID",
+            "type": "RECORD",
+            "mode": "REQUIRED",
+            "fields": [
+              {
+                "name": "shardNum",
+                "type": "INTEGER",
+                "mode": "REQUIRED"
+              },
+              {
+                "name": "realmNum",
+                "type": "INTEGER",
+                "mode": "REQUIRED"
+              },
+              {
+                "name": "entityNum",
+                "type": "INTEGER",
+                "mode": "REQUIRED"
+              }
+            ]
+          },
+          {
+            "name": "transactionFee",
+            "type": "INTEGER"
+          },
+          {
+            "name": "transactionValidDuration",
+            "type": "RECORD",
+            "fields": [
+              {
+                "name": "seconds",
+                "type": "INTEGER"
+              }
+            ]
+          },
+          {
+            "name": "memo",
+            "type": "STRING"
+          },
+          {
+            "name": "cryptoCreateAccount",
+            "type": "RECORD",
+            "fields": [
+              {
+                "name": "initialBalance",
+                "type": "INTEGER"
+              },
+              {
+                "name": "proxyAccountID",
+                "type": "RECORD",
+                "fields": [
+                  {
+                    "name": "shardNum",
+                    "type": "INTEGER",
+                    "mode": "REQUIRED"
+                  },
+                  {
+                    "name": "realmNum",
+                    "type": "INTEGER",
+                    "mode": "REQUIRED"
+                  },
+                  {
+                    "name": "entityNum",
+                    "type": "INTEGER",
+                    "mode": "REQUIRED"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "name": "contractCall",
+            "type": "RECORD",
+            "fields": [
+              {
+                "name": "gas",
+                "type": "INTEGER"
+              },
+              {
+                "name": "amount",
+                "type": "INTEGER"
+              },
+              {
+                "name": "functionParameters",
+                "type": "BYTES"
+              }
+            ]
+          },
+          {
+            "name": "contractCreateInstance",
+            "type": "RECORD",
+            "fields": [
+              {
+                "name": "gas",
+                "type": "INTEGER"
+              },
+              {
+                "name": "initialBalance",
+                "type": "INTEGER"
+              },
+              {
+                "name": "proxyAccountID",
+                "type": "RECORD",
+                "fields": [
+                  {
+                    "name": "shardNum",
+                    "type": "INTEGER",
+                    "mode": "REQUIRED"
+                  },
+                  {
+                    "name": "realmNum",
+                    "type": "INTEGER",
+                    "mode": "REQUIRED"
+                  },
+                  {
+                    "name": "entityNum",
+                    "type": "INTEGER",
+                    "mode": "REQUIRED"
+                  }
+                ]
+              },
+              {
+                "name": "constructorParameters",
+                "type": "BYTES"
+              },
+              {
+                "name": "memo",
+                "type": "BYTES"
+              }
+            ]
+          },
+          {
+            "name": "cryptoAddClaim",
+            "type": "RECORD",
+            "fields": [
+              {
+                "name": "claim",
+                "type": "RECORD",
+                "fields": [
+                  {
+                    "name": "hash",
+                    "type": "BYTES"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "name": "consensusSubmitMessage",
+            "type": "RECORD",
+            "fields": [
+              {
+                "name": "message",
+                "type": "BYTES",
+                "mode": "REQUIRED"
+              }
+            ]
+          },
+          {
+            "name": "fileCreate",
+            "type": "RECORD",
+            "fields": [
+              {
+                "name": "contents",
+                "type": "BYTES",
+                "mode": "REQUIRED"
+              }
+            ]
+          },
+          {
+            "name": "fileAppend",
+            "type": "RECORD",
+            "fields": [
+              {
+                "name": "contents",
+                "type": "BYTES",
+                "mode": "REQUIRED"
+              }
+            ]
+          },
+          {
+            "name": "fileUpdate",
+            "type": "RECORD",
+            "fields": [
+              {
+                "name": "contents",
+                "type": "BYTES",
+                "mode": "REQUIRED"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "record",
+    "type": "RECORD",
+    "mode": "REQUIRED",
+    "fields": [
+      {
+        "name": "receipt",
+        "type": "RECORD",
+        "mode": "REQUIRED",
+        "fields": [
+          {
+            "name": "status",
+            "type": "INTEGER",
+            "mode": "REQUIRED"
+          },
+          {
+            "name": "topicSequenceNumber",
+            "type": "INTEGER"
+          },
+          {
+            "name": "topicRunningHash",
+            "type": "BYTES"
+          }
+        ]
+      },
+      {
+        "name": "transactionHash",
+        "type": "BYTES"
+      },
+      {
+        "name": "transactionFee",
+        "type": "INTEGER"
+      },
+      {
+        "name": "contractCallResult",
+        "type": "RECORD",
+        "fields": [
+          {
+            "name": "contractCallResult",
+            "type": "BYTES"
+          },
+          {
+            "name": "errorMessage",
+            "type": "STRING"
+          },
+          {
+            "name": "gasUsed",
+            "type": "INTEGER"
+          }
+        ]
+      },
+      {
+        "name": "contractCreateResult",
+        "type": "RECORD",
+        "fields": [
+          {
+            "name": "contractCallResult",
+            "type": "BYTES"
+          },
+          {
+            "name": "errorMessage",
+            "type": "STRING"
+          },
+          {
+            "name": "gasUsed",
+            "type": "INTEGER"
+          }
+        ]
+      },
+      {
+        "name": "transferList",
+        "type": "RECORD",
+        "fields": [
+          {
+            "name": "accountAmounts",
+            "type": "RECORD",
+            "mode": "REPEATED",
+            "fields": [
+              {
+                "name": "accountID",
+                "type": "RECORD",
+                "mode": "REQUIRED",
+                "fields": [
+                  {
+                    "name": "shardNum",
+                    "type": "INTEGER",
+                    "mode": "REQUIRED"
+                  },
+                  {
+                    "name": "realmNum",
+                    "type": "INTEGER",
+                    "mode": "REQUIRED"
+                  },
+                  {
+                    "name": "entityNum",
+                    "type": "INTEGER",
+                    "mode": "REQUIRED"
+                  }
+                ]
+              },
+              {
+                "name": "amount",
+                "type": "INTEGER",
+                "mode": "REQUIRED"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "nonFeeTransfers",
+    "type": "RECORD",
+    "fields": [
+      {
+        "name": "accountAmounts",
+        "type": "RECORD",
+        "mode": "REPEATED",
+        "fields": [
+          {
+            "name": "accountID",
+            "type": "RECORD",
+            "mode": "REQUIRED",
+            "fields": [
+              {
+                "name": "shardNum",
+                "type": "INTEGER",
+                "mode": "REQUIRED"
+              },
+              {
+                "name": "realmNum",
+                "type": "INTEGER",
+                "mode": "REQUIRED"
+              },
+              {
+                "name": "entityNum",
+                "type": "INTEGER",
+                "mode": "REQUIRED"
+              }
+            ]
+          },
+          {
+            "name": "amount",
+            "type": "INTEGER",
+            "mode": "REQUIRED"
+          }
+        ]
+      }
+    ]
+  }
+]

@@ -9,9 +9,9 @@ package com.hedera.mirror.importer.parser.record;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *      http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -21,89 +21,322 @@ package com.hedera.mirror.importer.parser.record;
  */
 
 import com.google.protobuf.InvalidProtocolBufferException;
+import com.hederahashgraph.api.proto.java.AccountAmount;
 import com.hederahashgraph.api.proto.java.AccountID;
 import com.hederahashgraph.api.proto.java.ConsensusSubmitMessageTransactionBody;
 import com.hederahashgraph.api.proto.java.ContractCallTransactionBody;
 import com.hederahashgraph.api.proto.java.ContractCreateTransactionBody;
+import com.hederahashgraph.api.proto.java.ContractFunctionResult;
 import com.hederahashgraph.api.proto.java.ContractID;
-import com.hederahashgraph.api.proto.java.ContractUpdateTransactionBody;
 import com.hederahashgraph.api.proto.java.CryptoAddClaimTransactionBody;
 import com.hederahashgraph.api.proto.java.CryptoCreateTransactionBody;
-import com.hederahashgraph.api.proto.java.CryptoUpdateTransactionBody;
 import com.hederahashgraph.api.proto.java.FileAppendTransactionBody;
 import com.hederahashgraph.api.proto.java.FileCreateTransactionBody;
 import com.hederahashgraph.api.proto.java.FileID;
 import com.hederahashgraph.api.proto.java.FileUpdateTransactionBody;
-import com.hederahashgraph.api.proto.java.ResponseCodeEnum;
-import com.hederahashgraph.api.proto.java.Timestamp;
 import com.hederahashgraph.api.proto.java.TopicID;
 import com.hederahashgraph.api.proto.java.Transaction;
 import com.hederahashgraph.api.proto.java.TransactionBody;
-import com.hederahashgraph.api.proto.java.TransactionID;
+import com.hederahashgraph.api.proto.java.TransactionReceipt;
 import com.hederahashgraph.api.proto.java.TransactionRecord;
-import com.hederahashgraph.api.proto.java.TransferList;
 import java.io.IOException;
-import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
-import java.util.function.Predicate;
 import javax.inject.Named;
 import lombok.extern.log4j.Log4j2;
+import org.apache.commons.codec.binary.Base64;
 
 import com.hedera.mirror.importer.addressbook.NetworkAddressBook;
-import com.hedera.mirror.importer.domain.ContractResult;
-import com.hedera.mirror.importer.domain.CryptoTransfer;
-import com.hedera.mirror.importer.domain.Entities;
-import com.hedera.mirror.importer.domain.EntityId;
-import com.hedera.mirror.importer.domain.EntityType;
-import com.hedera.mirror.importer.domain.FileData;
-import com.hedera.mirror.importer.domain.LiveHash;
-import com.hedera.mirror.importer.domain.NonFeeTransfer;
-import com.hedera.mirror.importer.domain.TopicMessage;
 import com.hedera.mirror.importer.exception.ImporterException;
 import com.hedera.mirror.importer.exception.ParserException;
-import com.hedera.mirror.importer.parser.CommonParserProperties;
 import com.hedera.mirror.importer.parser.domain.RecordItem;
-import com.hedera.mirror.importer.repository.EntityRepository;
-import com.hedera.mirror.importer.repository.EntityTypeRepository;
 import com.hedera.mirror.importer.util.Utility;
 
 @Log4j2
 @Named
 public class RecordItemParser implements RecordItemListener {
+    private final static Map<String, Object> EMPTY_MAP = new HashMap<>();
+
     private final RecordParserProperties parserProperties;
     private final NetworkAddressBook networkAddressBook;
-    private final EntityRepository entityRepository;
-    private final EntityTypeRepository entityTypeRepository;
     private final NonFeeTransferExtractionStrategy nonFeeTransfersExtractor;
-    private final Predicate<com.hedera.mirror.importer.domain.Transaction> transactionFilter;
-    private final RecordParsedItemHandler recordParsedItemHandler;
+    private final BigQueryWriter bigQueryWriter;
 
-    public RecordItemParser(CommonParserProperties commonParserProperties, RecordParserProperties parserProperties,
-                            NetworkAddressBook networkAddressBook, EntityRepository entityRepository,
-                            EntityTypeRepository entityTypeRepository,
+    public RecordItemParser(RecordParserProperties parserProperties,
+                            NetworkAddressBook networkAddressBook,
                             NonFeeTransferExtractionStrategy nonFeeTransfersExtractor,
-                            RecordParsedItemHandler recordParsedItemHandler) {
+                            BigQueryWriter bigQueryWriter) {
         this.parserProperties = parserProperties;
         this.networkAddressBook = networkAddressBook;
-        this.entityRepository = entityRepository;
-        this.entityTypeRepository = entityTypeRepository;
         this.nonFeeTransfersExtractor = nonFeeTransfersExtractor;
-        this.recordParsedItemHandler = recordParsedItemHandler;
-        transactionFilter = commonParserProperties.getFilter();
+        this.bigQueryWriter = bigQueryWriter;
     }
 
-    public static boolean isSuccessful(TransactionRecord transactionRecord) {
-        return ResponseCodeEnum.SUCCESS == transactionRecord.getReceipt().getStatus();
+    @Override
+    public void onItem(RecordItem recordItem) throws ImporterException {
+        Transaction transaction = recordItem.getTransaction();
+        TransactionBody body = getTransactionBody(transaction);
+        TransactionRecord txRecord = recordItem.getRecord();
+        // TODO: note that filtering not supported. Or support it.
+
+        log.trace("Storing transaction body: {}", () -> Utility.printProtoMessage(body));
+        Map<String, Object> bqRow = new HashMap<>();
+        long consensusTimestamp = Utility.timeStampInNanos(txRecord.getConsensusTimestamp());
+        bqRow.put("consensusTimestamp", consensusTimestamp);
+        bqRow.put("transactionType", getTransactionType(body));
+        addTransactionBodyFields(bqRow, body, txRecord);
+        addTransactionRecordFields(bqRow, txRecord);
+        addNonFeeTransfers(bqRow, body, txRecord);
+        log.debug("Storing row: {}", bqRow);
+        bigQueryWriter.insertRow(String.valueOf(consensusTimestamp), bqRow);
     }
 
-    private static boolean isFileAddressBook(FileID fileId) {
-        return (fileId.getFileNum() == 102) && (fileId.getShardNum() == 0) && (fileId.getRealmNum() == 0);
+    private void addTransactionBodyFields(Map<String, Object> bqRow, TransactionBody body, TransactionRecord txRecord) {
+        Map<String, Object> bodyFields = new HashMap<>();
+        bqRow.put("transaction", Map.of("body", bodyFields));
+        bodyFields.put("transactionID", Map.of(
+                "transactionValidStart", Utility.timeStampInNanos(body.getTransactionID().getTransactionValidStart()),
+                "accountID", makeEntityMap(body.getTransactionID().getAccountID())));
+        bodyFields.put("nodeAccountID", makeEntityMap(body.getNodeAccountID()));
+        bodyFields.put("transactionFee", body.getTransactionFee());
+        bodyFields.put("transactionValidDuration", Map.of("seconds", body.getTransactionValidDuration().getSeconds()));
+        bodyFields.put("memo", body.getMemo());
+        addTransactionBodyDataFields(bqRow, body, txRecord);
+    }
+
+    private void addTransactionBodyDataFields(
+            Map<String, Object> bqRow, TransactionBody body, TransactionRecord txRecord) {
+        if (body.hasContractCall()) {
+            addContractCallFields(bqRow, body.getContractCall());
+        } else if (body.hasContractCreateInstance()) {
+            addContractCreateFields(bqRow, body.getContractCreateInstance());
+        } else if (body.hasContractDeleteInstance()) {
+            bqRow.putAll(getCudEntityBq(body.getContractDeleteInstance().getContractID()));
+        } else if (body.hasContractUpdateInstance()) {
+            bqRow.putAll(getCudEntityBq(body.getContractUpdateInstance().getContractID()));
+        } else if (body.hasCryptoCreateAccount()) {
+            addCryptoCreateAccountFields(bqRow, body.getCryptoCreateAccount());
+        } else if (body.hasCryptoAddClaim()) {
+            addCryptoAddClaimFields(bqRow, body.getCryptoAddClaim());
+        } else if (body.hasCryptoDelete()) {
+            bqRow.putAll(getCudEntityBq(body.getCryptoDelete().getDeleteAccountID()));
+        } else if (body.hasCryptoDeleteClaim()) {
+            bqRow.putAll(getCudEntityBq(body.getCryptoDeleteClaim().getAccountIDToDeleteFrom()));
+        } else if (body.hasCryptoUpdateAccount()) {
+            bqRow.putAll(getCudEntityBq(body.getCryptoUpdateAccount().getAccountIDToUpdate()));
+        } else if (body.hasFileCreate()) {
+            addFileCreateFields(bqRow, body.getFileCreate(), txRecord.getReceipt().getFileID());
+        } else if (body.hasFileAppend()) {
+            addFileAppendFields(bqRow, body.getFileAppend());
+        } else if (body.hasFileDelete()) {
+            bqRow.putAll(getCudEntityBq(body.getFileDelete().getFileID()));
+        } else if (body.hasFileUpdate()) {
+            addFileUpdateFields(bqRow, body.getFileUpdate());
+        } else if (body.hasSystemDelete()) {
+            if (body.getSystemDelete().hasContractID()) {
+                bqRow.putAll(getCudEntityBq(body.getSystemDelete().getContractID()));
+            } else if (body.getSystemDelete().hasFileID()) {
+                bqRow.putAll(getCudEntityBq(body.getSystemDelete().getFileID()));
+            }
+        } else if (body.hasSystemUndelete()) {
+            if (body.getSystemUndelete().hasContractID()) {
+                bqRow.putAll(getCudEntityBq(body.getSystemUndelete().getContractID()));
+            } else if (body.getSystemUndelete().hasFileID()) {
+                bqRow.putAll(getCudEntityBq(body.getSystemUndelete().getFileID()));
+            }
+        } else if (body.hasConsensusCreateTopic()) {
+            // do nothing
+        } else if (body.hasConsensusUpdateTopic()) {
+            bqRow.putAll(getCudEntityBq(body.getConsensusUpdateTopic().getTopicID()));
+        } else if (body.hasConsensusDeleteTopic()) {
+            bqRow.putAll(getCudEntityBq(body.getConsensusDeleteTopic().getTopicID()));
+        } else if (body.hasConsensusSubmitMessage()) {
+            addConsensusSubmitMessageFields(bqRow, body.getConsensusSubmitMessage());
+        }
+    }
+
+    private void addTransactionRecordFields(Map<String, Object> bqRow, TransactionRecord txRecord) {
+        Map<String, Object> recordFields = new HashMap<>();
+        addTransactionReceiptFields(bqRow, recordFields, txRecord.getReceipt());
+        recordFields.put("transactionHash", Base64.encodeBase64String(txRecord.getTransactionHash().toByteArray()));
+        recordFields.put("transactionFee", txRecord.getTransactionFee());
+        if (txRecord.hasContractCallResult()) {
+            recordFields.put("contractCallResult", getContractFunctionResultFields(txRecord.getContractCallResult()));
+        }
+        if (txRecord.hasContractCreateResult()) {
+            recordFields.put("contractCreateResult",
+                    getContractFunctionResultFields(txRecord.getContractCreateResult()));
+        }
+        if ((txRecord.hasTransferList()) && parserProperties.getPersist().isCryptoTransferAmounts()) {
+            recordFields.put("transferList",
+                    getTransferListFields(txRecord.getTransferList().getAccountAmountsList().iterator()));
+        }
+        bqRow.put("record", recordFields);
+    }
+
+    private void addTransactionReceiptFields(
+            Map<String, Object> bqRow, Map<String, Object> recordFields, TransactionReceipt txReceipt) {
+        Map<String, Object> receiptFields = new HashMap<>();
+        receiptFields.put("status", txReceipt.getStatus().getNumber());
+        if (txReceipt.hasAccountID()) {
+            bqRow.putAll(getCudEntityBq(txReceipt.getAccountID()));
+        } else if (txReceipt.hasFileID()) {
+            bqRow.putAll(getCudEntityBq(txReceipt.getFileID()));
+        } else if (txReceipt.hasContractID()) {
+            bqRow.putAll(getCudEntityBq(txReceipt.getContractID()));
+        } else if (txReceipt.hasTopicID()) {
+            bqRow.putAll(getCudEntityBq(txReceipt.getTopicID()));
+        }
+        if (txReceipt.getTopicSequenceNumber() != 0) {
+            receiptFields.put("topicSequenceNumber", txReceipt.getTopicSequenceNumber());
+        }
+        if (!txReceipt.getTopicRunningHash().isEmpty()) {
+            receiptFields.put("topicRunningHash",
+                    Base64.encodeBase64String(txReceipt.getTopicRunningHash().toByteArray()));
+        }
+        recordFields.put("receipt", receiptFields);
+    }
+
+    /**
+     * Should the given transaction/record generate non_fee_transfers based on what type the transaction is, it's
+     * status, and run-time configuration concerning which situations warrant storing.
+     */
+    private boolean shouldStoreNonFeeTransfers(TransactionBody body) {
+        if (!body.hasCryptoCreateAccount() && !body.hasContractCreateInstance() && !body.hasCryptoTransfer() &&
+                !body.hasContractCall()) {
+            return false;
+        }
+        return parserProperties.getPersist().isCryptoTransferAmounts()
+                && parserProperties.getPersist().isNonFeeTransfers();
+    }
+
+    /**
+     * Additionally store rows in the non_fee_transactions table if applicable. This will allow the rest-api to create
+     * an itemized set of transfers that reflects non-fees (explicit transfers), threshold records, node fee, and
+     * network+service fee (paid to treasury).
+     */
+    private void addNonFeeTransfers(
+            Map<String, Object> bqRow, TransactionBody body, TransactionRecord transactionRecord) {
+        if (transactionRecord.hasTransferList() && shouldStoreNonFeeTransfers(body)) {
+            bqRow.put("nonFeeTransfers", getTransferListFields(nonFeeTransfersExtractor.extractNonFeeTransfers(
+                    body.getTransactionID().getAccountID(), body, transactionRecord).iterator()));
+        }
+    }
+
+    private void addConsensusSubmitMessageFields(
+            Map<String, Object> bqRow, ConsensusSubmitMessageTransactionBody submitMessage) {
+        bqRow.putAll(getCudEntityBq(submitMessage.getTopicID()));
+        getBodyMap(bqRow).put("consensusSubmitMessage",
+                Map.of("message", Base64.encodeBase64String(submitMessage.getMessage().toByteArray())));
+    }
+
+    private void addFileCreateFields(Map<String, Object> bqRow, FileCreateTransactionBody fileCreate,
+                                     FileID fileId) {
+        if (parserProperties.getPersist().isFiles() ||
+                (parserProperties.getPersist().isSystemFiles() && fileId.getFileNum() < 1000)) {
+            getBodyMap(bqRow).put("fileCreate", Map.of("contents",
+                    Base64.encodeBase64String(fileCreate.getContents().toByteArray())));
+        }
+    }
+
+    private void addFileAppendFields(Map<String, Object> bqRow, FileAppendTransactionBody fileAppend) {
+        FileID fileId = fileAppend.getFileID();
+        bqRow.putAll(getCudEntityBq(fileId));
+        byte[] contents = fileAppend.getContents().toByteArray();
+        if (parserProperties.getPersist().isFiles() ||
+                (parserProperties.getPersist().isSystemFiles() && fileId.getFileNum() < 1000)) {
+            getBodyMap(bqRow).put("fileAppend", Map.of("contents", Base64.encodeBase64String(contents)));
+        }
+        // we have an address book update, refresh the local file
+        if (isFileAddressBook(fileId)) {
+            try {
+                networkAddressBook.append(contents);
+            } catch (IOException e) {
+                throw new ParserException("Error appending to network address book", e);
+            }
+        }
+    }
+
+    private void addFileUpdateFields(Map<String, Object> bqRow, FileUpdateTransactionBody fileUpdate) {
+        FileID fileId = fileUpdate.getFileID();
+        bqRow.putAll(getCudEntityBq(fileId));
+        byte[] contents = fileUpdate.getContents().toByteArray();
+        if (parserProperties.getPersist().isFiles() ||
+                (parserProperties.getPersist().isSystemFiles() && fileId.getFileNum() < 1000)) {
+            getBodyMap(bqRow).put("fileUpdate", Map.of("contents", Base64.encodeBase64String(contents)));
+        }
+        // we have an address book update, refresh the local file
+        if (isFileAddressBook(fileId)) {
+            try {
+                networkAddressBook.update(contents);
+            } catch (IOException e) {
+                throw new ParserException("Error appending to network address book", e);
+            }
+        }
+    }
+
+    private void addCryptoCreateAccountFields(Map<String, Object> bqRow, CryptoCreateTransactionBody cryptoCreate) {
+        Map<String, Object> fields = new HashMap<>();
+        fields.put("initialBalance", cryptoCreate.getInitialBalance());
+        if (cryptoCreate.hasProxyAccountID()) {
+            fields.put("proxyAccountID", makeEntityMap(cryptoCreate.getProxyAccountID()));
+        }
+        getBodyMap(bqRow).put("cryptoCreateAccount", fields);
+    }
+
+    private void addCryptoAddClaimFields(Map<String, Object> bqRow, CryptoAddClaimTransactionBody cryptoAddClaim) {
+        bqRow.putAll(getCudEntityBq(cryptoAddClaim.getClaim().getAccountID()));
+        if (parserProperties.getPersist().isClaims()) {
+            getBodyMap(bqRow).put("cryptoAddClaim", Map.of("claim",
+                    Map.of("hash", Base64.encodeBase64String(cryptoAddClaim.getClaim().getHash().toByteArray()))));
+        }
+    }
+
+    private void addContractCallFields(
+            Map<String, Object> bqRow, ContractCallTransactionBody contractCall) {
+        bqRow.putAll(getCudEntityBq(contractCall.getContractID()));
+        if (parserProperties.getPersist().isContracts()) {
+            Map<String, Object> fields = new HashMap<>();
+            fields.put("gas", contractCall.getGas());
+            fields.put("functionParameters", Base64
+                    .encodeBase64String(contractCall.getFunctionParameters().toByteArray()));
+            fields.put("amount", contractCall.getAmount());
+            getBodyMap(bqRow).put("contractCall", fields);
+        }
+    }
+
+    private void addContractCreateFields(
+            Map<String, Object> bqRow, ContractCreateTransactionBody contractCreate) {
+        if (parserProperties.getPersist().isContracts()) {
+            Map<String, Object> fields = new HashMap<>();
+            fields.put("gas", contractCreate.getGas());
+            fields.put("initialBalance", contractCreate.getInitialBalance());
+            fields.put("constructorParameters", Base64
+                    .encodeBase64String(contractCreate.getConstructorParameters().toByteArray()));
+            fields.put("memo", Base64.encodeBase64String(contractCreate.getMemoBytes().toByteArray()));
+            getBodyMap(bqRow).put("contractCreateInstance", fields);
+        }
+    }
+
+    private static TransactionBody getTransactionBody(Transaction transaction) {
+        if (transaction.hasBody()) {
+            return transaction.getBody();
+        } else {
+            try {
+                return TransactionBody.parseFrom(transaction.getBodyBytes());
+            } catch (InvalidProtocolBufferException e) {
+                throw new ParserException("Error parsing transaction from body bytes", e);
+            }
+        }
     }
 
     /**
      * Because body.getDataCase() can return null for unknown transaction types, we instead get oneof generically
      *
-     * @param body
      * @return The protobuf ID that represents the transaction type
      */
     private static int getTransactionType(TransactionBody body) {
@@ -125,711 +358,83 @@ public class RecordItemParser implements RecordItemListener {
         return dataCase.getNumber();
     }
 
-    @Override
-    public void onItem(RecordItem recordItem) throws ImporterException {
-        Transaction transaction = recordItem.getTransaction();
-        TransactionRecord txRecord = recordItem.getRecord();
-
-        TransactionBody body;
-        if (transaction.hasBody()) {
-            body = transaction.getBody();
-        } else {
-            try {
-                body = TransactionBody.parseFrom(transaction.getBodyBytes());
-            } catch (InvalidProtocolBufferException e) {
-                throw new ParserException("Error parsing transaction from body bytes", e);
-            }
-        }
-
-        log.trace("Storing transaction body: {}", () -> Utility.printProtoMessage(body));
-        long initialBalance = 0;
-
-        Entities entity = null; // Entity used when t_entities row must be updated.
-        EntityId entityId = null; // Entity ID simply used for reference purposes (in the transaction object)
-        EntityId proxyEntityId = null;
-
-        /**
-         * If the transaction wasn't successful don't update the entity.
-         * Still include the transfer list.
-         * Still create the entity (empty) and reference it from t_transactions, as it would have been validated
-         * to exist in preconsensus checks.
-         * Don't update any attributes of the entity.
-         */
-        boolean doUpdateEntity = isSuccessful(txRecord);
-
-        if (body.hasContractCall()) {
-            if (body.getContractCall().hasContractID()) {
-                entityId = getEntityId(body.getContractCall().getContractID());
-            }
-        } else if (body.hasContractCreateInstance()) {
-            if (txRecord.getReceipt().hasContractID()) { // implies SUCCESS
-                ContractCreateTransactionBody txMessage = body.getContractCreateInstance();
-                entity = getEntity(txRecord.getReceipt().getContractID());
-                proxyEntityId = getEntityId(txMessage.getProxyAccountID());
-
-                if (txMessage.hasAutoRenewPeriod()) {
-                    entity.setAutoRenewPeriod(txMessage.getAutoRenewPeriod().getSeconds());
-                }
-
-                // Can't clear memo on contracts. 0 length indicates no change
-                if (txMessage.getMemo() != null && txMessage.getMemo().length() > 0) {
-                    entity.setMemo(txMessage.getMemo());
-                }
-
-                if (txMessage.hasAdminKey()) {
-                    entity.setKey(txMessage.getAdminKey().toByteArray());
-                }
-            }
-
-            initialBalance = body.getContractCreateInstance().getInitialBalance();
-        } else if (body.hasContractDeleteInstance()) {
-            if (body.getContractDeleteInstance().hasContractID()) {
-                entity = getEntity(body.getContractDeleteInstance().getContractID());
-                if (doUpdateEntity) {
-                    entity.setDeleted(true);
-                }
-            }
-        } else if (body.hasContractUpdateInstance()) {
-            ContractUpdateTransactionBody txMessage = body.getContractUpdateInstance();
-            entity = getEntity(txMessage.getContractID());
-
-            if (doUpdateEntity) {
-                proxyEntityId = getEntityId(txMessage.getProxyAccountID());
-
-                if (txMessage.hasExpirationTime()) {
-                    entity.setExpiryTimeNs(Utility.timestampInNanosMax(txMessage.getExpirationTime()));
-                }
-
-                if (txMessage.hasAutoRenewPeriod()) {
-                    entity.setAutoRenewPeriod(txMessage.getAutoRenewPeriod().getSeconds());
-                }
-
-                if (txMessage.hasAdminKey()) {
-                    entity.setKey(txMessage.getAdminKey().toByteArray());
-                }
-
-                // Can't clear memo on contracts. 0 length indicates no change
-                if (txMessage.getMemo() != null && txMessage.getMemo().length() > 0) {
-                    entity.setMemo(txMessage.getMemo());
-                }
-            }
-        } else if (body.hasCryptoAddClaim()) {
-            if (body.getCryptoAddClaim().hasClaim()) {
-                if (body.getCryptoAddClaim().getClaim().hasAccountID()) {
-                    entityId = getEntityId(body.getCryptoAddClaim().getClaim().getAccountID());
-                }
-            }
-        } else if (body.hasCryptoCreateAccount()) {
-            if (txRecord.getReceipt().hasAccountID()) { // Implies SUCCESS
-                CryptoCreateTransactionBody txMessage = body.getCryptoCreateAccount();
-                proxyEntityId = getEntityId(txMessage.getProxyAccountID());
-                entity = getEntity(txRecord.getReceipt().getAccountID());
-
-                if (txMessage.hasAutoRenewPeriod()) {
-                    entity.setAutoRenewPeriod(txMessage.getAutoRenewPeriod().getSeconds());
-                }
-
-                if (txMessage.hasKey()) {
-                    entity.setKey(txMessage.getKey().toByteArray());
-                }
-            }
-
-            initialBalance = body.getCryptoCreateAccount().getInitialBalance();
-        } else if (body.hasCryptoDelete()) {
-            if (body.getCryptoDelete().hasDeleteAccountID()) {
-                entity = getEntity(body.getCryptoDelete().getDeleteAccountID());
-                if (doUpdateEntity) {
-                    entity.setDeleted(true);
-                }
-            }
-        } else if (body.hasCryptoDeleteClaim()) {
-            if (body.getCryptoDeleteClaim().hasAccountIDToDeleteFrom()) {
-                entityId = getEntityId(body.getCryptoDeleteClaim().getAccountIDToDeleteFrom());
-            }
-        } else if (body.hasCryptoUpdateAccount()) {
-            CryptoUpdateTransactionBody txMessage = body.getCryptoUpdateAccount();
-            entity = getEntity(txMessage.getAccountIDToUpdate());
-            if (doUpdateEntity) {
-                proxyEntityId = getEntityId(txMessage.getProxyAccountID());
-
-                if (txMessage.hasExpirationTime()) {
-                    entity.setExpiryTimeNs(Utility.timestampInNanosMax(txMessage.getExpirationTime()));
-                }
-
-                if (txMessage.hasAutoRenewPeriod()) {
-                    entity.setAutoRenewPeriod(txMessage.getAutoRenewPeriod().getSeconds());
-                }
-
-                if (txMessage.hasKey()) {
-                    entity.setKey(txMessage.getKey().toByteArray());
-                }
-            }
-        } else if (body.hasFileCreate()) {
-            if (txRecord.getReceipt().hasFileID()) { // Implies SUCCESS
-                FileCreateTransactionBody txMessage = body.getFileCreate();
-                entity = getEntity(txRecord.getReceipt().getFileID());
-
-                if (txMessage.hasExpirationTime()) {
-                    entity.setExpiryTimeNs(Utility.timestampInNanosMax(txMessage.getExpirationTime()));
-                }
-
-                if (txMessage.hasKeys()) {
-                    entity.setKey(txMessage.getKeys().toByteArray());
-                }
-            }
-        } else if (body.hasFileAppend()) {
-            if (body.getFileAppend().hasFileID()) {
-                entityId = getEntityId(body.getFileAppend().getFileID());
-            }
-        } else if (body.hasFileDelete()) {
-            if (body.getFileDelete().hasFileID()) {
-                entity = getEntity(body.getFileDelete().getFileID());
-                if (doUpdateEntity) {
-                    entity.setDeleted(true);
-                }
-            }
-        } else if (body.hasFileUpdate()) {
-            FileUpdateTransactionBody txMessage = body.getFileUpdate();
-            entity = getEntity(txMessage.getFileID());
-
-            if (doUpdateEntity) {
-                if (txMessage.hasExpirationTime()) {
-                    entity.setExpiryTimeNs(Utility.timestampInNanosMax(txMessage.getExpirationTime()));
-                }
-
-                if (txMessage.hasKeys()) {
-                    entity.setKey(txMessage.getKeys().toByteArray());
-                }
-            }
-        } else if (body.hasSystemDelete()) {
-            if (body.getSystemDelete().hasContractID()) {
-                entity = getEntity(body.getSystemDelete().getContractID());
-                if (doUpdateEntity) {
-                    entity.setDeleted(true);
-                }
-            } else if (body.getSystemDelete().hasFileID()) {
-                entity = getEntity(body.getSystemDelete().getFileID());
-                if (doUpdateEntity) {
-                    entity.setDeleted(true);
-                }
-            }
-        } else if (body.hasSystemUndelete()) {
-            if (body.getSystemUndelete().hasContractID()) {
-                entity = getEntity(body.getSystemUndelete().getContractID());
-                if (doUpdateEntity) {
-                    entity.setDeleted(false);
-                }
-            } else if (body.getSystemUndelete().hasFileID()) {
-                entity = getEntity(body.getSystemUndelete().getFileID());
-                if (doUpdateEntity) {
-                    entity.setDeleted(false);
-                }
-            }
-        } else if (body.hasConsensusCreateTopic()) {
-            entity = storeConsensusCreateTopic(body, txRecord);
-        } else if (body.hasConsensusUpdateTopic()) {
-            entity = storeConsensusUpdateTopic(body, txRecord);
-        } else if (body.hasConsensusDeleteTopic()) {
-            entity = storeConsensusDeleteTopic(body, txRecord);
-        } else if (body.hasConsensusSubmitMessage()) {
-            entityId = storeConsensusSubmitMessage(body, txRecord);
-        }
-
-        TransactionID transactionID = body.getTransactionID();
-        long validDurationSeconds = body.hasTransactionValidDuration() ? body.getTransactionValidDuration()
-                .getSeconds() : null;
-        long validStartNs = Utility.timeStampInNanos(transactionID.getTransactionValidStart());
-        long consensusNs = Utility.timeStampInNanos(txRecord.getConsensusTimestamp());
-        AccountID payerAccountId = transactionID.getAccountID();
-
-        com.hedera.mirror.importer.domain.Transaction tx = new com.hedera.mirror.importer.domain.Transaction();
-        tx.setChargedTxFee(txRecord.getTransactionFee());
-        tx.setConsensusNs(consensusNs);
-        if (entityId != null) {
-            var tempEntity = new Entities();
-            tempEntity.setId(entityId.getId());
-            tempEntity.setEntityShard(entityId.getEntityShard());
-            tempEntity.setEntityRealm(entityId.getEntityRealm());
-            tempEntity.setEntityNum(entityId.getEntityNum());
-            tx.setEntity(tempEntity);
-        } else if (null != entity) {
-            tx.setEntity(entity);
-        }
-        tx.setInitialBalance(initialBalance);
-        tx.setMemo(body.getMemo().getBytes());
-        tx.setMaxFee(body.getTransactionFee());
-        tx.setResult(txRecord.getReceipt().getStatusValue());
-        tx.setType(getTransactionType(body));
-        tx.setTransactionBytes(parserProperties.getPersist().isTransactionBytes() ? recordItem
-                .getTransactionBytes() : null);
-        tx.setTransactionHash(txRecord.getTransactionHash().toByteArray());
-        tx.setValidDurationSeconds(validDurationSeconds);
-        tx.setValidStartNs(validStartNs);
-
-        if (!transactionFilter.test(tx)) {
-            log.debug("Ignoring transaction {}", tx);
-            return;
-        }
-
-        if (entity != null) {
-            if (proxyEntityId != null) {
-                entity.setProxyAccountId(proxyEntityId.getId());
-            }
-            entity.setAutoRenewAccount(createEntity(entity.getAutoRenewAccount()));
-            entity = entityRepository.save(entity);
-        } else if (entityId != null) {
-            entity = new Entities();
-            entity.setId(entityId.getId());
-        }
-        tx.setEntity(entity);
-
-        EntityId payerEntityId = getEntityId(payerAccountId);
-        EntityId nodeEntityId = getEntityId(body.getNodeAccountID());
-        tx.setNodeAccountId(nodeEntityId.getId());
-        tx.setPayerAccountId(payerEntityId.getId());
-
-        if ((txRecord.hasTransferList()) && parserProperties.getPersist().isCryptoTransferAmounts()) {
-            processNonFeeTransfers(consensusNs, payerAccountId, body, txRecord);
-            if (body.hasCryptoCreateAccount() && isSuccessful(txRecord)) {
-                insertCryptoCreateTransferList(consensusNs, txRecord, body, txRecord.getReceipt()
-                        .getAccountID(), payerAccountId);
-            } else {
-                insertTransferList(consensusNs, txRecord.getTransferList());
-            }
-        }
-
-        // TransactionBody-specific handlers.
-        if (body.hasContractCall()) {
-            insertContractCall(consensusNs, body.getContractCall(), txRecord);
-        } else if (body.hasContractCreateInstance()) {
-            insertContractCreateInstance(consensusNs, body.getContractCreateInstance(), txRecord);
-        }
-        if (doUpdateEntity) {
-            if (body.hasConsensusSubmitMessage()) {
-                insertConsensusTopicMessage(body.getConsensusSubmitMessage(), txRecord);
-            } else if (body.hasCryptoAddClaim()) {
-                insertCryptoAddClaim(consensusNs, body.getCryptoAddClaim());
-            } else if (body.hasFileAppend()) {
-                insertFileAppend(consensusNs, body.getFileAppend());
-            } else if (body.hasFileCreate()) {
-                insertFileData(consensusNs, body.getFileCreate().getContents().toByteArray(),
-                        txRecord.getReceipt().getFileID());
-            } else if (body.hasFileUpdate()) {
-                insertFileUpdate(consensusNs, body.getFileUpdate());
-            }
-        }
-
-        recordParsedItemHandler.onTransaction(tx);
-        log.debug("Storing transaction: {}", tx);
-    }
-
-    /**
-     * Should the given transaction/record generate non_fee_transfers based on what type the transaction is, it's
-     * status, and run-time configuration concerning which situations warrant storing.
-     *
-     * @param body
-     * @param transactionRecord
-     * @return
-     */
-    private boolean shouldStoreNonFeeTransfers(TransactionBody body, TransactionRecord transactionRecord) {
-        if (!body.hasCryptoCreateAccount() && !body.hasContractCreateInstance() && !body.hasCryptoTransfer() && !body
-                .hasContractCall()) {
-            return false;
-        }
-        return parserProperties.getPersist().isNonFeeTransfers();
-    }
-
-    /**
-     * Additionally store rows in the non_fee_transactions table if applicable. This will allow the rest-api to create
-     * an itemized set of transfers that reflects non-fees (explicit transfers), threshold records, node fee, and
-     * network+service fee (paid to treasury).
-     */
-    private void processNonFeeTransfers(long consensusTimestamp, AccountID payerAccountId,
-                                        TransactionBody body, TransactionRecord transactionRecord) {
-        if (!shouldStoreNonFeeTransfers(body, transactionRecord)) {
-            return;
-        }
-
-        for (var aa : nonFeeTransfersExtractor.extractNonFeeTransfers(payerAccountId, body, transactionRecord)) {
-            addNonFeeTransferInserts(consensusTimestamp, aa.getAccountID().getRealmNum(),
-                    aa.getAccountID().getAccountNum(), aa.getAmount());
-        }
-    }
-
-    private void addNonFeeTransferInserts(long consensusTimestamp, long realm, long accountNum, long amount) {
-        if (0 != amount) {
-            recordParsedItemHandler.onNonFeeTransfer(
-                    new NonFeeTransfer(consensusTimestamp, realm, accountNum, amount));
-        }
-    }
-
-    /**
-     * Store ConsensusCreateTopic transaction in the database.
-     *
-     * @param body
-     * @param transactionRecord
-     * @return Entity ID of the newly created topic, or 0 if no topic was created
-     * @throws SQLException
-     * @throws IllegalArgumentException
-     */
-    private Entities storeConsensusCreateTopic(TransactionBody body,
-                                               TransactionRecord transactionRecord) {
-        if (!body.hasConsensusCreateTopic()) {
-            throw new IllegalArgumentException("transaction is not a ConsensusCreateTopic");
-        }
-
-        if (!transactionRecord.getReceipt().hasTopicID()) {
-            return null;
-        }
-
-        Entities entity = getEntity(transactionRecord.getReceipt().getTopicID());
-        var transactionBody = body.getConsensusCreateTopic();
-
-        if (transactionBody.hasAutoRenewAccount()) {
-            Entities autoRenewAccount = getEntity(transactionBody.getAutoRenewAccount());
-            entity.setAutoRenewAccount(autoRenewAccount);
-        }
-
-        if (transactionBody.hasAutoRenewPeriod()) {
-            entity.setAutoRenewPeriod(transactionBody.getAutoRenewPeriod().getSeconds());
-        }
-
-        // If either key is empty, they should end up as empty bytea in the DB to indicate that there is
-        // explicitly no value, as opposed to null which has been used to indicate the value is unknown.
-        var adminKey = transactionBody.hasAdminKey() ? transactionBody.getAdminKey().toByteArray() : new byte[0];
-        var submitKey = transactionBody.hasSubmitKey() ? transactionBody.getSubmitKey().toByteArray() : new byte[0];
-
-        entity.setMemo(transactionBody.getMemo());
-        entity.setKey(adminKey);
-        entity.setSubmitKey(submitKey);
-        return entity;
-    }
-
-    /**
-     * Store ConsensusUpdateTopic transaction in the database.
-     *
-     * @param body
-     * @param transactionRecord
-     * @return Entity ID of the updated topic, or 0 if no topic was updated
-     * @throws SQLException
-     * @throws IllegalArgumentException
-     */
-    private Entities storeConsensusUpdateTopic(TransactionBody body,
-                                               TransactionRecord transactionRecord) {
-        if (!body.hasConsensusUpdateTopic()) {
-            throw new IllegalArgumentException("transaction is not a ConsensusUpdateTopic");
-        }
-
-        var transactionBody = body.getConsensusUpdateTopic();
-        if (!transactionBody.hasTopicID()) {
-            log.warn("Encountered a ConsensusUpdateTopic transaction without topic ID: {}", body);
-            return null;
-        }
-
-        Entities entity = getEntity(transactionBody.getTopicID());
-
-        if (isSuccessful(transactionRecord)) {
-            if (transactionBody.hasExpirationTime()) {
-                Timestamp expirationTime = transactionBody.getExpirationTime();
-                entity.setExpiryTimeNs(Utility.timestampInNanosMax(expirationTime));
-            }
-
-            if (transactionBody.hasAutoRenewAccount()) {
-                Entities autoRenewAccount = getEntity(transactionBody.getAutoRenewAccount());
-                entity.setAutoRenewAccount(autoRenewAccount);
-            }
-
-            if (transactionBody.hasAutoRenewPeriod()) {
-                entity.setAutoRenewPeriod(transactionBody.getAutoRenewPeriod().getSeconds());
-            }
-
-            if (transactionBody.hasAdminKey()) {
-                entity.setKey(transactionBody.getAdminKey().toByteArray());
-            }
-
-            if (transactionBody.hasSubmitKey()) {
-                entity.setSubmitKey(transactionBody.getSubmitKey().toByteArray());
-            }
-
-            if (transactionBody.hasMemo()) {
-                entity.setMemo(transactionBody.getMemo().getValue());
-            }
-        }
-
-        return entity;
-    }
-
-    /**
-     * Store ConsensusDeleteTopic transaction in the database.
-     *
-     * @param body
-     * @param transactionRecord
-     * @return Entity ID of the deleted topic, or 0 if no topic was deleted
-     * @throws SQLException
-     * @throws IllegalArgumentException
-     */
-    private Entities storeConsensusDeleteTopic(TransactionBody body,
-                                               TransactionRecord transactionRecord) {
-        if (!body.hasConsensusDeleteTopic()) {
-            throw new IllegalArgumentException("transaction is not a ConsensusDeleteTopic");
-        }
-
-        var transactionBody = body.getConsensusDeleteTopic();
-        if (!transactionBody.hasTopicID()) {
-            log.warn("Encountered a ConsensusDeleteTopic transaction without topic ID: {}", body);
-            return null;
-        }
-
-        Entities entity = getEntity(transactionBody.getTopicID());
-        if (isSuccessful(transactionRecord)) {
-            entity.setDeleted(true);
-        }
-
-        return entity;
-    }
-
-    /**
-     * Store ConsensusSubmitMessage transaction in the database.
-     *
-     * @param body
-     * @param transactionRecord
-     * @return Entity ID of the topic, or 0 if no topic was deleted
-     * @throws SQLException
-     * @throws IllegalArgumentException
-     */
-    private EntityId storeConsensusSubmitMessage(TransactionBody body,
-                                                 TransactionRecord transactionRecord) {
-        if (!body.hasConsensusSubmitMessage()) {
-            throw new IllegalArgumentException("transaction is not a ConsensusSubmitMessage");
-        }
-
-        var transactionBody = body.getConsensusSubmitMessage();
-        if (!transactionBody.hasTopicID()) {
-            log.warn("Encountered a ConsensusSubmitMessage transaction without topic ID: {}", body);
-            return null;
-        }
-
-        return getEntityId(transactionBody.getTopicID());
-    }
-
-    private void insertConsensusTopicMessage(ConsensusSubmitMessageTransactionBody transactionBody,
-                                             TransactionRecord transactionRecord) {
-        var receipt = transactionRecord.getReceipt();
-        var topicId = transactionBody.getTopicID();
-        TopicMessage topicMessage = new TopicMessage(
-                Utility.timeStampInNanos(transactionRecord.getConsensusTimestamp()),
-                transactionBody.getMessage().toByteArray(), (int) topicId.getRealmNum(),
-                receipt.getTopicRunningHash().toByteArray(), receipt.getTopicSequenceNumber(),
-                (int) topicId.getTopicNum());
-        recordParsedItemHandler.onTopicMessage(topicMessage);
-    }
-
-    private void insertFileData(long consensusTimestamp, byte[] contents, FileID fileID) {
-        if (parserProperties.getPersist().isFiles() ||
-                (parserProperties.getPersist().isSystemFiles() && fileID.getFileNum() < 1000)) {
-            recordParsedItemHandler.onFileData(new FileData(consensusTimestamp, contents));
-        }
-    }
-
-    private void insertFileAppend(long consensusTimestamp, FileAppendTransactionBody transactionBody) {
-        byte[] contents = transactionBody.getContents().toByteArray();
-        insertFileData(consensusTimestamp, contents, transactionBody.getFileID());
-        // we have an address book update, refresh the local file
-        if (isFileAddressBook(transactionBody.getFileID())) {
-            try {
-                networkAddressBook.append(contents);
-            } catch (IOException e) {
-                throw new ParserException("Error appending to network address book", e);
-            }
-        }
-    }
-
-    private void insertCryptoAddClaim(long consensusTimestamp,
-                                      CryptoAddClaimTransactionBody transactionBody) {
-        if (parserProperties.getPersist().isClaims()) {
-            byte[] claim = transactionBody.getClaim().getHash().toByteArray();
-            recordParsedItemHandler.onLiveHash(new LiveHash(consensusTimestamp, claim));
-        }
-    }
-
-    private void insertContractCall(long consensusTimestamp,
-                                    ContractCallTransactionBody transactionBody,
-                                    TransactionRecord transactionRecord) {
-        if (parserProperties.getPersist().isContracts()) {
-            byte[] functionParams = transactionBody.getFunctionParameters().toByteArray();
-            long gasSupplied = transactionBody.getGas();
-            byte[] callResult = new byte[0];
-            long gasUsed = 0;
-            if (transactionRecord.hasContractCallResult()) {
-                callResult = transactionRecord.getContractCallResult().toByteArray();
-                gasUsed = transactionRecord.getContractCallResult().getGasUsed();
-            }
-            insertContractResults(consensusTimestamp, functionParams, gasSupplied, callResult, gasUsed);
-        }
-    }
-
-    private void insertContractCreateInstance(long consensusTimestamp,
-                                              ContractCreateTransactionBody transactionBody,
-                                              TransactionRecord transactionRecord) {
-        if (parserProperties.getPersist().isContracts()) {
-            byte[] functionParams = transactionBody.getConstructorParameters().toByteArray();
-            long gasSupplied = transactionBody.getGas();
-            byte[] callResult = new byte[0];
-            long gasUsed = 0;
-            if (transactionRecord.hasContractCreateResult()) {
-                callResult = transactionRecord.getContractCreateResult().toByteArray();
-                gasUsed = transactionRecord.getContractCreateResult().getGasUsed();
-            }
-            insertContractResults(consensusTimestamp, functionParams, gasSupplied, callResult, gasUsed);
-        }
-    }
-
-    private void insertTransferList(long consensusTimestamp, TransferList transferList) {
-        for (int i = 0; i < transferList.getAccountAmountsCount(); ++i) {
-            var aa = transferList.getAccountAmounts(i);
-            var accountId = aa.getAccountID();
-            createEntity(getEntity(aa.getAccountID()));
-            addCryptoTransferList(consensusTimestamp, accountId.getRealmNum(), accountId.getAccountNum(), aa
-                    .getAmount());
-        }
-    }
-
-    private void insertCryptoCreateTransferList(long consensusTimestamp,
-                                                TransactionRecord txRecord,
-                                                TransactionBody body,
-                                                AccountID createdAccountId,
-                                                AccountID payerAccountId) {
-
-        long initialBalance = 0;
-        long createdAccountNum = 0;
-
-        // no need to add missing initial balance to transfer list if this is realm and shard <> 0
-        boolean addInitialBalance = (txRecord.getReceipt().getAccountID().getShardNum() == 0) && (txRecord.getReceipt()
-                .getAccountID().getRealmNum() == 0);
-
-        if (addInitialBalance) {
-            initialBalance = body.getCryptoCreateAccount().getInitialBalance();
-            createdAccountNum = txRecord.getReceipt().getAccountID().getAccountNum();
-        }
-        TransferList transferList = txRecord.getTransferList();
-        for (int i = 0; i < transferList.getAccountAmountsCount(); ++i) {
-            var aa = transferList.getAccountAmounts(i);
-            var accountId = aa.getAccountID();
-            long accountNum = accountId.getAccountNum();
-            createEntity(getEntity(accountId));
-            addCryptoTransferList(consensusTimestamp, accountId.getRealmNum(), accountNum, aa.getAmount());
-
-            if (addInitialBalance && (initialBalance == aa.getAmount()) && (accountNum == createdAccountNum)) {
-                addInitialBalance = false;
-            }
-        }
-
-        if (addInitialBalance) {
-            createEntity(getEntity(payerAccountId));
-            addCryptoTransferList(consensusTimestamp, payerAccountId.getRealmNum(), payerAccountId
-                    .getAccountNum(), -initialBalance);
-
-            createEntity(getEntity(createdAccountId));
-            addCryptoTransferList(consensusTimestamp, createdAccountId
-                    .getRealmNum(), createdAccountNum, initialBalance);
-        }
-    }
-
-    private void addCryptoTransferList(long consensusTimestamp, long realmNum, long accountNum, long amount) {
-        recordParsedItemHandler
-                .onCryptoTransferList(new CryptoTransfer(consensusTimestamp, amount, realmNum, accountNum));
-    }
-
-    private void insertFileUpdate(long consensusTimestamp, FileUpdateTransactionBody transactionBody) {
-        FileID fileId = transactionBody.getFileID();
-        byte[] contents = transactionBody.getContents().toByteArray();
-        insertFileData(consensusTimestamp, contents, fileId);
-        // we have an address book update, refresh the local file
-        if (isFileAddressBook(fileId)) {
-            try {
-                networkAddressBook.update(contents);
-            } catch (IOException e) {
-                throw new ParserException("Error appending to network address book", e);
-            }
-        }
-    }
-
-    private void insertContractResults(
-            long consensusTimestamp, byte[] functionParams, long gasSupplied, byte[] callResult, long gasUsed) {
-        recordParsedItemHandler.onContractResult(
-                new ContractResult(consensusTimestamp, functionParams, gasSupplied, callResult, gasUsed));
-    }
-
-    public Entities getEntity(AccountID accountID) {
-        return getEntity(accountID.getShardNum(), accountID.getRealmNum(), accountID.getAccountNum(), "account");
-    }
-
-    public Entities getEntity(ContractID cid) {
-        return getEntity(cid.getShardNum(), cid.getRealmNum(), cid.getContractNum(), "contract");
-    }
-
-    public Entities getEntity(FileID fileId) {
-        return getEntity(fileId.getShardNum(), fileId.getRealmNum(), fileId.getFileNum(), "file");
-    }
-
-    public Entities getEntity(TopicID topicId) {
-        return getEntity(topicId.getShardNum(), topicId.getRealmNum(), topicId.getTopicNum(), "topic");
-    }
-
-    private Entities getEntity(long shardNum, long realmNum, long entityNum, String type) {
-        return entityRepository.findByPrimaryKey(shardNum, realmNum, entityNum).orElseGet(() -> {
-            Entities entity = new Entities();
-            entity.setEntityNum(entityNum);
-            entity.setEntityRealm(realmNum);
-            entity.setEntityShard(shardNum);
-            entity.setEntityTypeId(entityTypeRepository.findByName(type).map(EntityType::getId).get());
-            return entity;
+    private static Map<String, Object> getTransferListFields(Iterator<AccountAmount> accountAmounts) {
+        List<Map<String, Object>> accountAmountsList = new ArrayList<>();
+        accountAmounts.forEachRemaining(aa -> {
+            Map<String, Object> accountAmountFields = new HashMap<>();
+            accountAmountFields.put("accountID", makeEntityMap(aa.getAccountID()));
+            accountAmountFields.put("amount", aa.getAmount());
+            accountAmountsList.add(accountAmountFields);
         });
+        return Map.of("accountAmounts", accountAmountsList);
     }
 
-    public EntityId getEntityId(AccountID accountID) {
-        return getEntityId(accountID.getShardNum(), accountID.getRealmNum(), accountID.getAccountNum(), "account");
+    private static Map<String, Object> getContractFunctionResultFields(ContractFunctionResult contractFunctionResult) {
+        Map<String, Object> fields = new HashMap<>();
+        fields.put("contractCallResult",
+                Base64.encodeBase64String(contractFunctionResult.getContractCallResult().toByteArray()));
+        fields.put("errorMessage", contractFunctionResult.getErrorMessage());
+        fields.put("gasUsed", contractFunctionResult.getGasUsed());
+        return fields;
     }
 
-    public EntityId getEntityId(ContractID cid) {
-        return getEntityId(cid.getShardNum(), cid.getRealmNum(), cid.getContractNum(), "contract");
-    }
-
-    public EntityId getEntityId(FileID fileId) {
-        return getEntityId(fileId.getShardNum(), fileId.getRealmNum(), fileId.getFileNum(), "file");
-    }
-
-    public EntityId getEntityId(TopicID topicId) {
-        return getEntityId(topicId.getShardNum(), topicId.getRealmNum(), topicId.getTopicNum(), "topic");
-    }
-
-    private EntityId getEntityId(long shardNum, long realmNum, long entityNum, String type) {
-        if (0 == entityNum) {
-            return null;
+    public static Map<String, Object> getCudEntityBq(AccountID accountID) {
+        if (accountID == AccountID.getDefaultInstance()) {
+            return EMPTY_MAP;
         }
-        return entityRepository.findEntityIdByNativeIds(shardNum, realmNum, entityNum).orElseGet(() -> {
-            Entities entityId = new Entities();
-            entityId.setEntityShard(shardNum);
-            entityId.setEntityRealm(realmNum);
-            entityId.setEntityNum(entityNum);
-            entityId.setEntityTypeId(entityTypeRepository.findByName(type).map(EntityType::getId).get());
-            return entityRepository.saveAndCacheEntityId(entityId);
-        });
+        return getCudEntityBq(accountID.getShardNum(), accountID.getRealmNum(), accountID
+                .getAccountNum(), EntityType.ACCOUNT);
     }
 
-    private Entities createEntity(Entities entity) {
-        if (entity != null && entity.getId() == null) {
-            log.debug("Creating entity: {}", () -> entity.getDisplayId());
-            var result = entityRepository.save(entity);
-            var entityId = new EntityId(result.getId(), result.getEntityShard(), result.getEntityRealm(),
-                    result.getEntityNum(), result.getEntityTypeId());
-            entityRepository.cache(entityId);
-            return result;
+    public static Map<String, Object> getCudEntityBq(ContractID cid) {
+        if (cid == ContractID.getDefaultInstance()) {
+            return EMPTY_MAP;
         }
+        return getCudEntityBq(cid.getShardNum(), cid.getRealmNum(), cid.getContractNum(), EntityType.CONTRACT);
+    }
+
+    public static Map<String, Object> getCudEntityBq(FileID fileId) {
+        if (fileId == FileID.getDefaultInstance()) {
+            return EMPTY_MAP;
+        }
+        return getCudEntityBq(fileId.getShardNum(), fileId.getRealmNum(), fileId.getFileNum(), EntityType.FILE);
+    }
+
+    public static Map<String, Object> getCudEntityBq(TopicID topicId) {
+        if (topicId == TopicID.getDefaultInstance()) {
+            return EMPTY_MAP;
+        }
+        return getCudEntityBq(topicId.getShardNum(), topicId.getRealmNum(), topicId.getTopicNum(), EntityType.TOPIC);
+    }
+
+    private static Map<String, Object> getCudEntityBq(long shardNum, long realmNum, long entityNum, EntityType type) {
+        Map<String, Object> cudEntityBq = new HashMap<>();
+        cudEntityBq.put("cudEntityID", makeEntityMap(shardNum, realmNum, entityNum));
+        cudEntityBq.put("cudEntityType", type.ordinal());
+        return cudEntityBq;
+    }
+
+    public static Map<String, Object> makeEntityMap(AccountID accountID) {
+        return makeEntityMap(accountID.getShardNum(), accountID.getRealmNum(), accountID.getAccountNum());
+    }
+
+    private static Map<String, Object> getBodyMap(Map<String, Object> bqRow) {
+        return ((Map<String, Object>) ((Map<String, Object>) bqRow.get("transaction")).get("body"));
+    }
+
+    public static Map<String, Object> makeEntityMap(long shardNum, long realmNum, long entityNum) {
+        Map<String, Object> entity = new HashMap<>();
+        entity.put("shardNum", shardNum);
+        entity.put("realmNum", realmNum);
+        entity.put("entityNum", entityNum);
         return entity;
     }
 
-    public enum INIT_RESULT {
-        OK, FAIL, SKIP
+    private static boolean isFileAddressBook(FileID fileId) {
+        return (fileId.getFileNum() == 102) && (fileId.getShardNum() == 0) && (fileId.getRealmNum() == 0);
+    }
+
+    enum EntityType {
+        ZERO, ACCOUNT, CONTRACT, FILE, TOPIC
     }
 }
