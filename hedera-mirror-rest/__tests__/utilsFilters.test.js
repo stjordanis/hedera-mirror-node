@@ -21,6 +21,7 @@
 
 const utils = require('../utils.js');
 const constants = require('../constants.js');
+const { InvalidArgumentError } = require('../errors/invalidArgumentError');
 
 describe('utils buildComparatorFilter tests', () => {
   test('Verify buildComparatorFilter for sequencenumber=lt:2', () => {
@@ -136,7 +137,7 @@ describe('utils formatComparator tests', () => {
   test('Verify formatComparator for account.id=5', () => {
     const filter = utils.buildComparatorFilter(constants.filterKeys.ACCOUNT_ID, '5');
     utils.formatComparator(filter);
-    verifyFilter(filter, constants.filterKeys.ACCOUNT_ID, ' = ', {num: '5', realm: 0, shard: 0});
+    verifyFilter(filter, constants.filterKeys.ACCOUNT_ID, ' = ', { num: '5', realm: 0, shard: 0 });
   });
 
   test('Verify formatComparator for timestamp=1234567890.000000004', () => {
@@ -148,7 +149,7 @@ describe('utils formatComparator tests', () => {
   test('Verify formatComparator for account.id=gte:6', () => {
     const filter = utils.buildComparatorFilter(constants.filterKeys.ACCOUNT_ID, 'gte:6');
     utils.formatComparator(filter);
-    verifyFilter(filter, constants.filterKeys.ACCOUNT_ID, ' >= ', {num: '6', realm: 0, shard: 0});
+    verifyFilter(filter, constants.filterKeys.ACCOUNT_ID, ' >= ', { num: '6', realm: 0, shard: 0 });
   });
 
   test('Verify formatComparator for timestamp=lte:1234567890.000000004', () => {
@@ -165,7 +166,10 @@ describe('utils validateAndParseFilters tests', () => {
       utils.buildComparatorFilter(constants.filterKeys.SEQUENCE_NUMBER, '<=:2'),
     ];
 
-    verifyInvalidFilters(filters);
+    verifyInvalidFilters(
+      filters,
+      new InvalidArgumentError([constants.filterKeys.SEQUENCE_NUMBER, constants.filterKeys.SEQUENCE_NUMBER])
+    );
   });
 
   test('Verify validateAndParseFilters for erroneous data throws exception', () => {
@@ -181,7 +185,20 @@ describe('utils validateAndParseFilters tests', () => {
       utils.buildComparatorFilter(constants.filterKeys.ACCOUNT_BALANCE, '-1'),
     ];
 
-    verifyInvalidFilters(filters);
+    verifyInvalidFilters(
+      filters,
+      new InvalidArgumentError([
+        constants.filterKeys.ACCOUNT_ID,
+        constants.filterKeys.TIMESTAMP,
+        constants.filterKeys.ORDER,
+        constants.filterKeys.LIMIT,
+        constants.filterKeys.SEQUENCE_NUMBER,
+        constants.filterKeys.ACCOUNT_PUBLICKEY,
+        constants.filterKeys.RESULT,
+        constants.filterKeys.TYPE,
+        constants.filterKeys.ACCOUNT_BALANCE,
+      ])
+    );
   });
 
   test('Verify validateAndParseFilters for invalid format throws exception', () => {
@@ -194,7 +211,17 @@ describe('utils validateAndParseFilters tests', () => {
       utils.buildComparatorFilter(constants.filterKeys.ACCOUNT_BALANCE, '23456789012345678901234'),
     ];
 
-    verifyInvalidFilters(filters);
+    verifyInvalidFilters(
+      filters,
+      new InvalidArgumentError([
+        constants.filterKeys.ACCOUNT_ID,
+        constants.filterKeys.TIMESTAMP,
+        constants.filterKeys.LIMIT,
+        constants.filterKeys.SEQUENCE_NUMBER,
+        constants.filterKeys.ACCOUNT_PUBLICKEY,
+        constants.filterKeys.ACCOUNT_BALANCE,
+      ])
+    );
   });
 
   test('Verify validateAndParseFilters for valid filters does not throw exception', () => {
@@ -221,8 +248,8 @@ describe('utils validateAndParseFilters tests', () => {
   });
 });
 
-const verifyInvalidFilters = (filters) => {
+const verifyInvalidFilters = (filters, expectedException) => {
   expect(() => {
     utils.validateAndParseFilters(filters);
-  }).toThrowErrorMatchingSnapshot();
+  }).toThrow(expectedException);
 };

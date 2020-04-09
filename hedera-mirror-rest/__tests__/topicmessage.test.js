@@ -20,8 +20,8 @@
 'use strict';
 
 const topicmessage = require('../topicmessage.js');
-const utils = require('../utils.js');
 const config = require('../config.js');
+const { InvalidArgumentError } = require('../errors/invalidArgumentError');
 
 beforeAll(async () => {
   jest.setTimeout(1000);
@@ -130,13 +130,13 @@ describe('topicmessage formatTopicMessageRow tests', () => {
 
 describe('topicmessage extractSqlFromTopicMessagesRequest tests', () => {
   const filters = [
-    {key: 'sequencenumber', operator: ' > ', value: '2'},
-    {key: 'timestamp', operator: ' <= ', value: '1234567890.000000006'},
-    {key: 'limit', operator: ' = ', value: '3'},
-    {key: 'order', operator: ' = ', value: 'desc'},
+    { key: 'sequencenumber', operator: ' > ', value: '2' },
+    { key: 'timestamp', operator: ' <= ', value: '1234567890.000000006' },
+    { key: 'limit', operator: ' = ', value: '3' },
+    { key: 'order', operator: ' = ', value: 'desc' },
   ];
 
-  let {query, params, order, limit} = topicmessage.extractSqlFromTopicMessagesRequest('7', filters);
+  let { query, params, order, limit } = topicmessage.extractSqlFromTopicMessagesRequest('7', filters);
 
   expect(query).toStrictEqual(
     'select consensus_timestamp, realm_num, topic_num, message, running_hash, sequence_number from topic_message where realm_num = $1 and topic_num = $2 and sequence_number > $3 and consensus_timestamp <= $4 order by consensus_timestamp desc limit $5;'
@@ -146,7 +146,7 @@ describe('topicmessage extractSqlFromTopicMessagesRequest tests', () => {
   expect(limit).toStrictEqual(3);
 });
 
-const verifyValidConsensusTimestamp = (timestamp) => {
+const verifyValidConsensusTimestamp = timestamp => {
   expect(() => {
     topicmessage.validateConsensusTimestampParam(timestamp);
   }).not.toThrow();
@@ -158,26 +158,29 @@ const verifyValidTopicAndSequenceNum = (topicid, seqnum) => {
   }).not.toThrow();
 };
 
-const verifyValidTopicMessages = (topicid) => {
+const verifyValidTopicMessages = topicid => {
   expect(() => {
     topicmessage.validateGetTopicMessagesParams(topicid);
   }).not.toThrow();
 };
 
-const verifyInvalidConsensusTimestamp = (timestamp) => {
+const invalidConsensusTimestampError = new InvalidArgumentError('consensus_timestamp');
+const verifyInvalidConsensusTimestamp = timestamp => {
   expect(() => {
     topicmessage.validateConsensusTimestampParam(timestamp);
-  }).toThrowErrorMatchingSnapshot();
+  }).toThrow(invalidConsensusTimestampError);
 };
 
+const invalidTopicAndSequenceError = new InvalidArgumentError(['topic_num', 'sequence_number']);
 const verifyInvalidTopicAndSequenceNum = (topicid, seqnum) => {
   expect(() => {
     topicmessage.validateGetSequenceMessageParams(topicid, seqnum);
-  }).toThrowErrorMatchingSnapshot();
+  }).toThrow(invalidTopicAndSequenceError);
 };
 
-const verifyInvalidTopicMessages = (topicid) => {
+const invalidTopicError = new InvalidArgumentError('topic_num');
+const verifyInvalidTopicMessages = topicid => {
   expect(() => {
     topicmessage.validateGetTopicMessagesParams(topicid);
-  }).toThrowErrorMatchingSnapshot();
+  }).toThrow(invalidTopicError);
 };

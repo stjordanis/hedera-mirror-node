@@ -18,17 +18,15 @@
  * ‍
  */
 'use strict';
-const {FormattedError} = require('./formattedError');
 
 const InvalidArgumentErrorMessageFormat = 'Invalid parameter: ';
 
-class InvalidArgumentError extends FormattedError {
+class InvalidArgumentError extends Error {
   constructor(badParams) {
     if (!Array.isArray(badParams)) {
       badParams = [badParams];
     }
-
-    super(badParams.map((p) => `${InvalidArgumentErrorMessageFormat}${p}`));
+    super(badParams.map(p => `${InvalidArgumentErrorMessageFormat}${p}`));
   }
 }
 
