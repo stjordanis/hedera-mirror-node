@@ -23,6 +23,9 @@ package com.hedera.mirror.importer.parser.record.entity.sql;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import javax.inject.Named;
 import javax.sql.DataSource;
 import lombok.RequiredArgsConstructor;
@@ -65,6 +68,7 @@ public class SqlEntityListener implements EntityListener, RecordStreamFileListen
     private PreparedStatement sqlInsertLiveHashes;
     private PreparedStatement sqlInsertTopicMessage;
     private Connection connection;
+    private ExecutorService executor = Executors.newFixedThreadPool(10);
 
     @Override
     public void onStart(StreamFileData streamFileData) {
@@ -170,23 +174,29 @@ public class SqlEntityListener implements EntityListener, RecordStreamFileListen
 
     private void executeBatches() {
         try {
-            int[] transactions = sqlInsertTransaction.executeBatch();
-            int[] entityIds = sqlInsertEntityId.executeBatch();
-            int[] transferLists = sqlInsertTransferList.executeBatch();
-            int[] nonFeeTransfers = sqlInsertNonFeeTransfers.executeBatch();
-            int[] fileData = sqlInsertFileData.executeBatch();
-            int[] contractResult = sqlInsertContractResult.executeBatch();
-            int[] liveHashes = sqlInsertLiveHashes.executeBatch();
-            int[] topicMessages = sqlInsertTopicMessage.executeBatch();
+            var txns = executeBatchInParallel(sqlInsertTransaction);
+            var cts = executeBatchInParallel(sqlInsertTransferList);
+            var entityIds = executeBatchInParallel(sqlInsertEntityId);
+            var nft = executeBatchInParallel(sqlInsertNonFeeTransfers);
+            var fd = executeBatchInParallel(sqlInsertFileData);
+            var contracts = executeBatchInParallel(sqlInsertContractResult);
+            var lh = executeBatchInParallel(sqlInsertLiveHashes);
+            var tm = executeBatchInParallel(sqlInsertTopicMessage);
             log.info("Inserted {} transactions, {} entities, {} transfer lists, {} files, {} contracts, {} claims, " +
                             "{} topic messages, {} non-fee transfers",
-                    transactions.length, entityIds.length, transferLists.length, fileData.length, contractResult.length,
-                    liveHashes.length, topicMessages.length, nonFeeTransfers.length);
-        } catch (SQLException e) {
+                    txns.get(), entityIds.get(), cts.get(), fd.get(), contracts.get(), lh.get(), tm.get(), nft.get());
+        } catch (Exception e) {
             log.error("Error committing sql insert batch ", e);
-            throw new ParserSQLException(e);
+            throw new ParserException(e);
         }
         batch_count = 0;
+    }
+
+    private Future<Integer> executeBatchInParallel(PreparedStatement ps) {
+        return executor.submit(() -> {
+            int[] result = ps.executeBatch();
+            return result.length;
+        });
     }
 
     @Override
