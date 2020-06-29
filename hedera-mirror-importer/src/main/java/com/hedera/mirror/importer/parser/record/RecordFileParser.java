@@ -107,6 +107,7 @@ public class RecordFileParser implements FileParser {
         AtomicInteger counter = new AtomicInteger(0);
         boolean success = false;
         try {
+            var st = Instant.now();
             RecordFile recordFile = Utility.parseRecordFile(
                     streamFileData.getFilename(), expectedPrevFileHash,
                     parserProperties.getMirrorProperties().getVerifyHashAfter(),
@@ -114,12 +115,16 @@ public class RecordFileParser implements FileParser {
                         counter.incrementAndGet();
                         processRecordItem(recordItem);
                     });
+            log.info("Time for in-memory processing: {}ms", Duration.between(st, Instant.now()).toMillis());
             recordFile.setLoadStart(startTime.getEpochSecond());
             recordFile.setLoadEnd(Instant.now().getEpochSecond());
             recordStreamFileListener.onEnd(recordFile);
             applicationStatusRepository.updateStatusValue(
                     ApplicationStatusCode.LAST_PROCESSED_RECORD_HASH, recordFile.getFileHash());
             success = true;
+            long x = Duration.between(Instant.ofEpochSecond(0L, recordFile.getConsensusStart()), startTime).toMillis();
+            long y = Duration.between(Instant.ofEpochSecond(0L, recordFile.getConsensusEnd()), startTime).toMillis();
+            log.info("Delay from consensus timestamp of first txn: {}, last txn: {}, avg: {}", x, y, (x+y)/2);
         } finally {
             var elapsedTimeMillis = Duration.between(startTime, Instant.now()).toMillis();
             var rate = elapsedTimeMillis > 0 ? (int) (1000.0 * counter.get() / elapsedTimeMillis) : 0;

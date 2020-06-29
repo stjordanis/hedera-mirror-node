@@ -234,7 +234,7 @@ public class SqlEntityListener implements EntityListener, RecordStreamFileListen
 
             if (batch_count == properties.getBatchSize() - 1) {
                 // execute any remaining batches
-                executeBatches();
+//                executeBatches();
             } else {
                 batch_count += 1;
             }

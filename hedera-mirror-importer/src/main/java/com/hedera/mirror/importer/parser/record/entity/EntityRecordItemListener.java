@@ -122,7 +122,7 @@ public class EntityRecordItemListener implements RecordItemListener {
             entityListener.onEntityId(entityId);
 
             if (isSuccessful && transactionHandler.updatesEntity()) {
-                updateEntity(recordItem, transactionHandler, entityId);
+//                updateEntity(recordItem, transactionHandler, entityId);
             }
         }
 
