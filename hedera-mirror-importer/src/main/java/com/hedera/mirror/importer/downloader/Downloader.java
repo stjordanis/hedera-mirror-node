@@ -348,6 +348,8 @@ public abstract class Downloader {
                         continue;
                     }
                     if (verifyDataFile(signedDataFile, signature.getHash())) {
+                        var fileInstant = Instant.parse(signedDataFile.getName().replaceAll(".rcd", "").replaceAll("_", ":"));
+                        log.info("Delay from file timestamp {}ms", Duration.between(fileInstant, Instant.now()).toMillis());
                         // move the file to the valid directory
                         File destination = validPath.resolve(signedDataFile.getName()).toFile();
                         if (moveFile(signedDataFile, destination)) {

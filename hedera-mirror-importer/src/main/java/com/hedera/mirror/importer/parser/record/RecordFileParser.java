@@ -115,7 +115,8 @@ public class RecordFileParser implements FileParser {
                         counter.incrementAndGet();
                         processRecordItem(recordItem);
                     });
-            log.info("Time for in-memory processing: {}ms", Duration.between(st, Instant.now()).toMillis());
+            var processingTime = Duration.between(st, Instant.now()).toMillis();
+            log.info("Time for record file processing (no db write): {}ms, {} txns, {} txn/sec", processingTime, counter.get(), counter.get() * 1000 / processingTime);
             recordFile.setLoadStart(startTime.getEpochSecond());
             recordFile.setLoadEnd(Instant.now().getEpochSecond());
             recordStreamFileListener.onEnd(recordFile);
