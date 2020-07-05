@@ -24,6 +24,7 @@ import com.google.common.base.Stopwatch;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
+import java.util.ArrayDeque;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.concurrent.TimeUnit;
@@ -51,6 +52,7 @@ import com.hedera.mirror.importer.parser.domain.StreamFileData;
 import com.hedera.mirror.importer.parser.record.RecordStreamFileListener;
 import com.hedera.mirror.importer.parser.record.entity.ConditionOnEntityRecordParser;
 import com.hedera.mirror.importer.parser.record.entity.EntityListener;
+import com.hedera.mirror.importer.parser.record.entity.nats.NatsEntityListener;
 import com.hedera.mirror.importer.repository.RecordFileRepository;
 
 @Log4j2
@@ -61,10 +63,13 @@ public class SqlEntityListener implements EntityListener, RecordStreamFileListen
     private final SqlProperties properties;
     private final DataSource dataSource;
     private final RecordFileRepository recordFileRepository;
+    private final NatsEntityListener natsEntityListener;
+
     private long batch_count = 0;
     // Keeps track of entityIds seen in the current file being processed. This is for optimizing inserts into
     // t_entities table so that insertion of node and treasury ids are not tried for every transaction.
     private Collection<EntityId> entityIds;
+    private Collection<TopicMessage> topicMessages;
     private PreparedStatement sqlInsertTransaction;
     private PreparedStatement sqlInsertEntityId;
     private PreparedStatement sqlInsertTransferList;
@@ -78,11 +83,12 @@ public class SqlEntityListener implements EntityListener, RecordStreamFileListen
     @Override
     public void onStart(StreamFileData streamFileData) {
         String fileName = streamFileData.getFilename();
-        entityIds = new HashSet<>();
         if (recordFileRepository.findByName(fileName).size() > 0) {
             throw new DuplicateFileException("File already exists in the database: " + fileName);
         }
         try {
+            entityIds = new HashSet<>();
+            topicMessages = new ArrayDeque<>();
             initConnectionAndStatements();
         } catch (Exception e) {
             throw new ParserException("Error setting up connection and statements", e);
@@ -193,6 +199,8 @@ public class SqlEntityListener implements EntityListener, RecordStreamFileListen
                             "claims: {}, topic messages: {}, non-fee transfers: {}",
                     transactions, entityIds, transferLists, fileData, contractResult, liveHashes, topicMessages,
                     nonFeeTransfers);
+            this.topicMessages.forEach(natsEntityListener::onTopicMessage);
+            this.topicMessages.clear();
         } catch (SQLException e) {
             log.error("Error committing sql insert batch ", e);
             throw new ParserSQLException(e);
@@ -302,6 +310,7 @@ public class SqlEntityListener implements EntityListener, RecordStreamFileListen
             sqlInsertTopicMessage
                     .setInt(F_TOPICMESSAGE.RUNNING_HASH_VERSION.ordinal(), topicMessage.getRunningHashVersion());
             sqlInsertTopicMessage.addBatch();
+            topicMessages.add(topicMessage);
         } catch (SQLException e) {
             throw new ParserSQLException(e);
         }

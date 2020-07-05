@@ -1,4 +1,4 @@
-package com.hedera.mirror.grpc.listener;
+package com.hedera.mirror.importer.parser.record.entity.nats;
 
 /*-
  * ‌
@@ -20,51 +20,24 @@ package com.hedera.mirror.grpc.listener;
  * ‍
  */
 
-import java.time.Duration;
 import javax.validation.constraints.Min;
 import javax.validation.constraints.NotBlank;
-import javax.validation.constraints.NotNull;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
 
 @Data
+@ConfigurationProperties("hedera.mirror.importer.parser.record.entity.nats")
 @Validated
-@ConfigurationProperties("hedera.mirror.grpc.listener")
-public class ListenerProperties {
+public class NatsProperties {
 
-    private boolean enabled = true;
+    private String password;
 
-    @Min(32)
-    private int maxPageSize = 10000;
+    @Min(1)
+    private int queueSize = 50_000;
 
-    @NotNull
-    private NatsProperties nats = new NatsProperties();
+    @NotBlank
+    private String uri = "nats://localhost:4223,nats://localhost:4222";
 
-    @NotNull
-    private Duration pollingFrequency = Duration.ofSeconds(1);
-
-    @NotNull
-    private ListenerType type = ListenerType.NATS;
-
-    public enum ListenerType {
-        NATS,
-        POLL,
-        SHARED_POLL
-    }
-
-    @Data
-    @Validated
-    public class NatsProperties {
-
-        private String password;
-
-        @Min(1)
-        private int queueSize = 50_000;
-
-        @NotBlank
-        private String uri = "nats://localhost:4223,nats://localhost:4222";
-
-        private String username;
-    }
+    private String username;
 }

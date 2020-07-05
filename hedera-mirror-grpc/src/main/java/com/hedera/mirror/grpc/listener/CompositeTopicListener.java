@@ -37,6 +37,7 @@ import com.hedera.mirror.grpc.listener.ListenerProperties.ListenerType;
 public class CompositeTopicListener implements TopicListener {
 
     private final ListenerProperties listenerProperties;
+    private final NatsTopicListener natsTopicListener;
     private final PollingTopicListener pollingTopicListener;
     private final SharedPollingTopicListener sharedPollingTopicListener;
 
@@ -53,6 +54,8 @@ public class CompositeTopicListener implements TopicListener {
         ListenerType type = listenerProperties.getType();
 
         switch (type) {
+            case NATS:
+                return natsTopicListener;
             case POLL:
                 return pollingTopicListener;
             case SHARED_POLL:

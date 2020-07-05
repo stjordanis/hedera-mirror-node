@@ -20,10 +20,12 @@ package com.hedera.mirror.grpc.domain;
  * ‍
  */
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.google.protobuf.UnsafeByteOperations;
 import com.hederahashgraph.api.proto.java.Timestamp;
 import java.time.Instant;
 import java.util.Comparator;
+import java.util.concurrent.atomic.AtomicReference;
 import javax.persistence.Entity;
 import javax.persistence.Id;
 import javax.persistence.Transient;
@@ -41,9 +43,10 @@ import com.hedera.mirror.grpc.converter.InstantToLongConverter;
 import com.hedera.mirror.grpc.converter.LongToInstantConverter;
 
 @AllArgsConstructor
-@NoArgsConstructor(force = true)
 @Builder
 @Entity
+@JsonIgnoreProperties(ignoreUnknown = true, value = {"consensusTimestampInstant", "response"})
+@NoArgsConstructor(force = true)
 @Value
 public class TopicMessage implements Comparable<TopicMessage>, Persistable<Long> {
 
@@ -73,13 +76,14 @@ public class TopicMessage implements Comparable<TopicMessage>, Persistable<Long>
     private int topicNum;
 
     @NonFinal
+    @ToString.Exclude
     @Transient
-    private volatile ConsensusTopicResponse response = null;
+    private final AtomicReference<ConsensusTopicResponse> response = new AtomicReference<>();
 
     // Cache this to avoid paying the conversion penalty for multiple subscribers to the same topic
     public ConsensusTopicResponse toResponse() {
-        if (response == null) {
-            response = ConsensusTopicResponse.newBuilder()
+        if (response.get() == null) {
+            response.set(ConsensusTopicResponse.newBuilder()
                     .setConsensusTimestamp(Timestamp.newBuilder()
                             .setSeconds(getConsensusTimestampInstant().getEpochSecond())
                             .setNanos(getConsensusTimestampInstant().getNano())
@@ -88,9 +92,9 @@ public class TopicMessage implements Comparable<TopicMessage>, Persistable<Long>
                     .setRunningHash(UnsafeByteOperations.unsafeWrap(runningHash))
                     .setRunningHashVersion(runningHashVersion)
                     .setSequenceNumber(sequenceNumber)
-                    .build();
+                    .build());
         }
-        return response;
+        return response.get();
     }
 
     @Override

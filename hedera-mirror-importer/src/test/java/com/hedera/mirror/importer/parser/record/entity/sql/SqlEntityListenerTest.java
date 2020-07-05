@@ -52,6 +52,7 @@ import com.hedera.mirror.importer.domain.TopicMessage;
 import com.hedera.mirror.importer.domain.Transaction;
 import com.hedera.mirror.importer.exception.DuplicateFileException;
 import com.hedera.mirror.importer.parser.domain.StreamFileData;
+import com.hedera.mirror.importer.parser.record.entity.nats.NatsEntityListener;
 import com.hedera.mirror.importer.repository.ContractResultRepository;
 import com.hedera.mirror.importer.repository.CryptoTransferRepository;
 import com.hedera.mirror.importer.repository.EntityRepository;
@@ -249,9 +250,10 @@ public class SqlEntityListenerTest extends IntegrationTest {
         });
 
         DataSource dataSource = mock(DataSource.class);
+        NatsEntityListener natsEntityListener = mock(NatsEntityListener.class);
         when(dataSource.getConnection()).thenReturn(connection);
         SqlEntityListener sqlEntityListener2 =
-                new SqlEntityListener(sqlProperties, dataSource, recordFileRepository);
+                new SqlEntityListener(sqlProperties, dataSource, recordFileRepository, natsEntityListener);
         sqlEntityListener2.onStart(new StreamFileData(UUID.randomUUID().toString(), null)); // setup connection
 
         // when
