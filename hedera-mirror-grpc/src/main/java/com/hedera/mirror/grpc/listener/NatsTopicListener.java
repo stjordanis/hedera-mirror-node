@@ -21,10 +21,10 @@ package com.hedera.mirror.grpc.listener;
  */
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.nats.client.Dispatcher;
 import io.nats.client.Subscription;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.inject.Named;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
 import reactor.core.publisher.Flux;
 
@@ -33,20 +33,25 @@ import com.hedera.mirror.grpc.domain.TopicMessageFilter;
 
 @Named
 @Log4j2
-@RequiredArgsConstructor
 public class NatsTopicListener implements TopicListener {
 
     private final ObjectMapper objectMapper;
-    private final ConnectionWrapper connection;
+    private final Dispatcher dispatcher;
+
+    public NatsTopicListener(ObjectMapper objectMapper, ConnectionWrapper connection) {
+        this.objectMapper = objectMapper;
+        dispatcher = connection.get().createDispatcher(m -> {
+        });
+    }
 
     @Override
     public Flux<TopicMessage> listen(TopicMessageFilter filter) {
+        String subject = "topic.0." + filter.getRealmNum() + "." + filter.getTopicNum();
         AtomicReference<Subscription> subscription = new AtomicReference<>();
 
-        Flux<TopicMessage> flux = Flux.create(sink -> {
-            String subject = "topic.0." + filter.getRealmNum() + "." + filter.getTopicNum();
+        return Flux.<TopicMessage>create(sink -> {
             log.info("Subscribing to subject {}: {}", subject, filter);
-            subscription.set(connection.getDispatcher().subscribe(subject, m -> {
+            subscription.set(dispatcher.subscribe(subject, m -> {
                 try {
                     TopicMessage topicMessage = objectMapper.readValue(m.getData(), TopicMessage.class);
                     sink.next(topicMessage);
@@ -54,9 +59,7 @@ public class NatsTopicListener implements TopicListener {
                     sink.error(e);
                 }
             }));
-        });
-
-        return flux.filter(t -> filterMessage(t, filter))
+        }).filter(t -> filterMessage(t, filter))
                 .doOnCancel(() -> log.info("Unsubscribing"))
                 .doOnCancel(() -> subscription.get().unsubscribe())
                 .doOnComplete(() -> subscription.get().unsubscribe());

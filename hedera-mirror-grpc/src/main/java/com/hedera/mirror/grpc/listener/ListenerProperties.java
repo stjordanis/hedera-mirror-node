@@ -59,11 +59,8 @@ public class ListenerProperties {
 
         private String password;
 
-        @Min(1)
-        private int queueSize = 50_000;
-
         @NotBlank
-        private String uri = "nats://localhost:4223,nats://localhost:4222";
+        private String uri = "nats://localhost:4222";
 
         private String username;
     }

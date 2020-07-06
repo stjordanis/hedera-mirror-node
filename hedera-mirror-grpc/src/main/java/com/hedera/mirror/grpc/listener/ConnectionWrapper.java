@@ -23,7 +23,6 @@ package com.hedera.mirror.grpc.listener;
 import io.nats.client.Connection;
 import io.nats.client.ConnectionListener;
 import io.nats.client.Consumer;
-import io.nats.client.Dispatcher;
 import io.nats.client.ErrorListener;
 import io.nats.client.Nats;
 import io.nats.client.Options;
@@ -36,7 +35,7 @@ import org.apache.commons.lang3.StringUtils;
 public class ConnectionWrapper implements ConnectionListener, ErrorListener {
 
     private final Options options;
-    private volatile Dispatcher dispatcher;
+    private volatile Connection connection;
 
     public ConnectionWrapper(ListenerProperties listenerProperties) {
         ListenerProperties.NatsProperties natsProperties = listenerProperties.getNats();
@@ -45,28 +44,25 @@ public class ConnectionWrapper implements ConnectionListener, ErrorListener {
         options = new Options.Builder()
                 .connectionListener(this)
                 .errorListener(this)
-                .maxMessagesInOutgoingQueue(natsProperties.getQueueSize())
                 .server(natsProperties.getUri())
                 .maxReconnects(-1)
                 .userInfo(username, password)
                 .build();
     }
 
-    public Dispatcher getDispatcher() {
-        if (dispatcher == null) {
+    public Connection get() {
+        if (connection == null) {
             synchronized (this) {
-                if (dispatcher == null) {
+                if (connection == null) {
                     try {
-                        Connection connection = Nats.connect(options);
-                        dispatcher = connection.createDispatcher(m -> {
-                        });
+                        connection = Nats.connect(options);
                     } catch (Exception e) {
                         throw new RuntimeException(e);
                     }
                 }
             }
         }
-        return dispatcher;
+        return connection;
     }
 
     @Override

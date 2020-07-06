@@ -37,7 +37,7 @@ public class NatsProperties {
     private int queueSize = 50_000;
 
     @NotBlank
-    private String uri = "nats://localhost:4223,nats://localhost:4222";
+    private String uri = "nats://localhost:4222";
 
     private String username;
 }
