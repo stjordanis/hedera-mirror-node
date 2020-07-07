@@ -47,6 +47,9 @@ public class TopicMessageFilter {
     private long limit;
 
     @Min(0)
+    private long min; // The minimum number of messages to return before being considered complete
+
+    @Min(0)
     private int realmNum;
 
     @NotNull

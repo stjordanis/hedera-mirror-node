@@ -80,8 +80,7 @@ public class SharedPollingTopicListener implements TopicListener {
 
     @Override
     public Flux<TopicMessage> listen(TopicMessageFilter filter) {
-        return poller.filter(t -> filterMessage(t, filter))
-                .doOnSubscribe(s -> log.info("Subscribing: {}", filter));
+        return poller.doOnSubscribe(s -> log.info("Subscribing: {}", filter));
     }
 
     private Flux<TopicMessage> poll(PollingContext context) {
@@ -96,12 +95,6 @@ public class SharedPollingTopicListener implements TopicListener {
                 .doOnCancel(context::onPollEnd)
                 .doOnComplete(context::onPollEnd)
                 .doOnSubscribe(context::onPollStart);
-    }
-
-    private boolean filterMessage(TopicMessage message, TopicMessageFilter filter) {
-        return message.getRealmNum() == filter.getRealmNum() &&
-                message.getTopicNum() == filter.getTopicNum() &&
-                message.getConsensusTimestamp() >= filter.getStartTimeLong();
     }
 
     @Data

@@ -36,6 +36,8 @@ import org.springframework.boot.actuate.health.CompositeHealthContributor;
 import org.springframework.boot.actuate.health.HealthIndicator;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.data.redis.connection.ReactiveRedisConnectionFactory;
+import org.springframework.data.redis.listener.ReactiveRedisMessageListenerContainer;
 
 import com.hedera.mirror.grpc.GrpcProperties;
 
@@ -76,5 +78,10 @@ public class GrpcConfiguration {
                 .maxConcurrentCallsPerConnection(nettyProperties.getMaxConcurrentCallsPerConnection())
                 .maxInboundMessageSize(nettyProperties.getMaxInboundMessageSize())
                 .maxInboundMetadataSize(nettyProperties.getMaxInboundMetadataSize());
+    }
+
+    @Bean
+    ReactiveRedisMessageListenerContainer reactiveRedisMessageListenerContainer(ReactiveRedisConnectionFactory connectionFactory) {
+        return new ReactiveRedisMessageListenerContainer(connectionFactory);
     }
 }

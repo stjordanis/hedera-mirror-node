@@ -85,17 +85,10 @@ public class NotifyingTopicListener implements TopicListener {
 
     @Override
     public Flux<TopicMessage> listen(TopicMessageFilter filter) {
-        return topicMessages.filter(t -> filterMessage(t, filter))
-                .doOnSubscribe(s -> log.info("Listening for messages: {}", filter))
+        return topicMessages.doOnSubscribe(s -> log.info("Listening for messages: {}", filter))
                 .doOnComplete(() -> log.info("complete: {}", filter))
                 .doOnError(e -> log.error("error: {}", filter, e))
                 .doOnCancel(() -> log.info("cancel: {}", filter));
-    }
-
-    private boolean filterMessage(TopicMessage message, TopicMessageFilter filter) {
-        return message.getRealmNum() == filter.getRealmNum() &&
-                message.getTopicNum() == filter.getTopicNum() &&
-                message.getConsensusTimestamp() >= filter.getStartTimeLong();
     }
 
     private TopicMessage toTopicMessage(String payload) {

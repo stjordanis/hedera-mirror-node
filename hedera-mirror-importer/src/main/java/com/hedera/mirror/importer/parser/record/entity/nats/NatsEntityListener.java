@@ -27,10 +27,10 @@ import javax.annotation.PostConstruct;
 import javax.inject.Named;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
+import org.springframework.data.redis.core.RedisTemplate;
 
 import com.hedera.mirror.importer.MirrorProperties;
 import com.hedera.mirror.importer.domain.TopicMessage;
-import com.hedera.mirror.importer.exception.ImporterException;
 
 @Log4j2
 @Named
@@ -41,10 +41,11 @@ public class NatsEntityListener {
     private final ObjectMapper objectMapper;
     private final ConnectionWrapper connection;
     private final MeterRegistry meterRegistry;
+    private final RedisTemplate<String, TopicMessage> redisTemplate;
 
     private Timer timer;
     private long shard;
-    private boolean enabled;
+    private MirrorProperties.Publisher publisher;
 
     @PostConstruct
     void init() {
@@ -53,13 +54,21 @@ public class NatsEntityListener {
                 .tag("type", "topicmessage")
                 .register(meterRegistry);
         shard = mirrorProperties.getShard(); // Cache to avoid reflection penalty
-        enabled = mirrorProperties.isNats();
+        publisher = mirrorProperties.getPublisher();
     }
 
-    public void onTopicMessage(TopicMessage topicMessage) throws ImporterException {
-        if (!enabled) {
-            return;
+    public void onTopicMessage(TopicMessage topicMessage) {
+        switch (publisher) {
+            case NATS:
+                publishToNats(topicMessage);
+                break;
+            case REDIS:
+                publishToRedis(topicMessage);
+                break;
         }
+    }
+
+    private void publishToNats(TopicMessage topicMessage) {
         String subject = String.format("topic.%d.%d.%d", shard, topicMessage.getRealmNum(), topicMessage.getTopicNum());
 
         try {
@@ -67,6 +76,16 @@ public class NatsEntityListener {
             timer.record(() -> connection.get().publish(subject, bytes));
         } catch (Exception e) {
             log.error("Unable to publish to subject {} via {}", subject, connection.get().getConnectedUrl(), e);
+        }
+    }
+
+    private void publishToRedis(TopicMessage topicMessage) {
+        String channel = String.format("topic.%d.%d.%d", shard, topicMessage.getRealmNum(), topicMessage.getTopicNum());
+
+        try {
+            timer.record(() -> redisTemplate.convertAndSend(channel, topicMessage));
+        } catch (Exception e) {
+            log.error("Unable to publish to redis {}", channel, e);
         }
     }
 }

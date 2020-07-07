@@ -110,7 +110,11 @@ public class PollingTopicMessageRetriever implements TopicMessageRetriever {
          * @return whether all historic messages have been returned
          */
         boolean isComplete() {
+//          if (filter.getMin() > 0) {
+//             return total.get() >= filter.getMin();
+//         } else {
             return pageSize.get() < retrieverProperties.getMaxPageSize();
+//         }
         }
 
         void onNext(TopicMessage topicMessage) {

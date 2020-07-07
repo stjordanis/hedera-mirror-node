@@ -136,6 +136,7 @@ public class TopicMessageServiceImpl implements TopicMessageService {
         TopicMessageFilter newFilter = topicContext.getFilter().toBuilder()
                 .endTime(current.getConsensusTimestampInstant())
                 .limit(numMissingMessages)
+                .min(numMissingMessages)
                 .startTime(last.getConsensusTimestampInstant().plusNanos(1))
                 .build();
 

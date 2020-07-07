@@ -44,7 +44,7 @@ public class MirrorProperties {
 
     private Path initialAddressBook;
 
-    private boolean nats = true;
+    private Publisher publisher = Publisher.NATS;
 
     @NotNull
     private Instant verifyHashAfter = Instant.parse("1970-01-01T00:00:00Z");
@@ -64,5 +64,11 @@ public class MirrorProperties {
     public void setDataPath(Path dataPath) {
         Utility.ensureDirectory(dataPath);
         this.dataPath = dataPath;
+    }
+
+    public enum Publisher {
+        NATS,
+        NONE,
+        REDIS
     }
 }

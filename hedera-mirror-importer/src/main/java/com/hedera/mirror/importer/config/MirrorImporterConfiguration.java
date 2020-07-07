@@ -32,6 +32,9 @@ import org.springframework.boot.autoconfigure.flyway.FlywayConfigurationCustomiz
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
+import org.springframework.data.redis.connection.RedisConnectionFactory;
+import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.serializer.Jackson2JsonRedisSerializer;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import software.amazon.awssdk.auth.credentials.AnonymousCredentialsProvider;
@@ -50,6 +53,7 @@ import software.amazon.awssdk.services.s3.S3AsyncClientBuilder;
 
 import com.hedera.mirror.importer.MirrorProperties;
 import com.hedera.mirror.importer.domain.HederaNetwork;
+import com.hedera.mirror.importer.domain.TopicMessage;
 import com.hedera.mirror.importer.downloader.CommonDownloaderProperties;
 import com.hedera.mirror.importer.leader.LeaderAspect;
 
@@ -143,6 +147,14 @@ public class MirrorImporterConfiguration {
             }
             configuration.getPlaceholders().put("topicRunningHashV2AddedTimestamp", timestamp.toString());
         };
+    }
+
+    @Bean
+    RedisTemplate<String, TopicMessage> redisTemplate(RedisConnectionFactory connectionFactory) {
+        RedisTemplate<String, TopicMessage> redisTemplate = new RedisTemplate<>();
+        redisTemplate.setConnectionFactory(connectionFactory);
+        redisTemplate.setValueSerializer(new Jackson2JsonRedisSerializer(TopicMessage.class));
+        return redisTemplate;
     }
 
     @Configuration

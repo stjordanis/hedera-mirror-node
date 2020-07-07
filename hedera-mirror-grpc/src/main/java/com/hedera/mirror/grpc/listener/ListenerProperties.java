@@ -45,12 +45,13 @@ public class ListenerProperties {
     private Duration pollingFrequency = Duration.ofSeconds(1);
 
     @NotNull
-    private ListenerType type = ListenerType.NATS;
+    private ListenerType type = ListenerType.SHARED_POLL;
 
     public enum ListenerType {
         NATS,
         NOTIFY,
         POLL,
+        REDIS,
         SHARED_POLL
     }
 

@@ -59,15 +59,9 @@ public class NatsTopicListener implements TopicListener {
                     sink.error(e);
                 }
             }));
-        }).filter(t -> filterMessage(t, filter))
+        })
                 .doOnCancel(() -> log.info("Unsubscribing"))
                 .doOnCancel(() -> subscription.get().unsubscribe())
                 .doOnComplete(() -> subscription.get().unsubscribe());
-    }
-
-    private boolean filterMessage(TopicMessage message, TopicMessageFilter filter) {
-        return message.getRealmNum() == filter.getRealmNum() &&
-                message.getTopicNum() == filter.getTopicNum() &&
-                message.getConsensusTimestamp() >= filter.getStartTimeLong();
     }
 }

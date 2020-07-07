@@ -40,6 +40,7 @@ public class CompositeTopicListener implements TopicListener {
     private final NatsTopicListener natsTopicListener;
     private final NotifyingTopicListener notifyingTopicListener;
     private final PollingTopicListener pollingTopicListener;
+    private final RedisTopicListener redisTopicListener;
     private final SharedPollingTopicListener sharedPollingTopicListener;
 
     @Override
@@ -48,7 +49,15 @@ public class CompositeTopicListener implements TopicListener {
             return Flux.empty();
         }
 
-        return getTopicListener().listen(filter);
+        return getTopicListener()
+                .listen(filter)
+                .filter(t -> filterMessage(t, filter));
+    }
+
+    private boolean filterMessage(TopicMessage message, TopicMessageFilter filter) {
+        return message.getRealmNum() == filter.getRealmNum() &&
+                message.getTopicNum() == filter.getTopicNum() &&
+                message.getConsensusTimestamp() >= filter.getStartTimeLong();
     }
 
     private TopicListener getTopicListener() {
@@ -61,6 +70,8 @@ public class CompositeTopicListener implements TopicListener {
                 return notifyingTopicListener;
             case POLL:
                 return pollingTopicListener;
+            case REDIS:
+                return redisTopicListener;
             case SHARED_POLL:
                 return sharedPollingTopicListener;
             default:
