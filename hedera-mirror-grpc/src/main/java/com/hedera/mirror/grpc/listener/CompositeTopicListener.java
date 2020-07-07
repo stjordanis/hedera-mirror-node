@@ -20,6 +20,10 @@ package com.hedera.mirror.grpc.listener;
  * ‍
  */
 
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
+import java.util.concurrent.TimeUnit;
+import javax.annotation.PostConstruct;
 import javax.inject.Named;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
@@ -42,6 +46,17 @@ public class CompositeTopicListener implements TopicListener {
     private final PollingTopicListener pollingTopicListener;
     private final RedisTopicListener redisTopicListener;
     private final SharedPollingTopicListener sharedPollingTopicListener;
+    private final MeterRegistry meterRegistry;
+    private Timer consensusToPublishTimer;
+
+    @PostConstruct
+    public void registerMetrics() {
+        Timer.Builder consensusToPublishMetric = Timer.builder("hedera.mirror.topicmessage.latency")
+                .description("The difference in ms between the time consensus was achieved and the mirror node " +
+                        "published the topic message");
+        consensusToPublishTimer = consensusToPublishMetric
+                .register(meterRegistry);
+    }
 
     @Override
     public Flux<TopicMessage> listen(TopicMessageFilter filter) {
@@ -51,7 +66,8 @@ public class CompositeTopicListener implements TopicListener {
 
         return getTopicListener()
                 .listen(filter)
-                .filter(t -> filterMessage(t, filter));
+                .filter(t -> filterMessage(t, filter))
+                .doOnNext(this::onNext);
     }
 
     private boolean filterMessage(TopicMessage message, TopicMessageFilter filter) {
@@ -77,5 +93,12 @@ public class CompositeTopicListener implements TopicListener {
             default:
                 throw new UnsupportedOperationException("Unknown listener type: " + type);
         }
+    }
+
+    private void onNext(TopicMessage topicMessage) {
+        // record consensus to topic message publish time
+        consensusToPublishTimer
+                .record(System.currentTimeMillis() - topicMessage.getConsensusTimestampInstant().toEpochMilli(),
+                        TimeUnit.MILLISECONDS);
     }
 }
