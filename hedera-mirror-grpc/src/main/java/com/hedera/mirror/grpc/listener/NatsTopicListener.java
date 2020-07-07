@@ -38,8 +38,8 @@ public class NatsTopicListener implements TopicListener {
     private final ObjectMapper objectMapper;
     private final Dispatcher dispatcher;
 
-    public NatsTopicListener(ObjectMapper objectMapper, ConnectionWrapper connection) {
-        this.objectMapper = objectMapper;
+    public NatsTopicListener(ConnectionWrapper connection) {
+        this.objectMapper = new ObjectMapper();
         dispatcher = connection.get().createDispatcher(m -> {
         });
     }
@@ -67,7 +67,7 @@ public class NatsTopicListener implements TopicListener {
 
     private boolean filterMessage(TopicMessage message, TopicMessageFilter filter) {
         return message.getRealmNum() == filter.getRealmNum() &&
-                message.getTopicNum() == filter.getTopicNum();// &&
-        //message.getConsensusTimestamp() >= filter.getStartTimeLong();
+                message.getTopicNum() == filter.getTopicNum() &&
+                message.getConsensusTimestamp() >= filter.getStartTimeLong();
     }
 }

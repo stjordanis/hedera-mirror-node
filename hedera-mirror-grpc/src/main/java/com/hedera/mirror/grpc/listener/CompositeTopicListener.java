@@ -38,6 +38,7 @@ public class CompositeTopicListener implements TopicListener {
 
     private final ListenerProperties listenerProperties;
     private final NatsTopicListener natsTopicListener;
+    private final NotifyingTopicListener notifyingTopicListener;
     private final PollingTopicListener pollingTopicListener;
     private final SharedPollingTopicListener sharedPollingTopicListener;
 
@@ -56,6 +57,8 @@ public class CompositeTopicListener implements TopicListener {
         switch (type) {
             case NATS:
                 return natsTopicListener;
+            case NOTIFY:
+                return notifyingTopicListener;
             case POLL:
                 return pollingTopicListener;
             case SHARED_POLL:

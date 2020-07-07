@@ -44,6 +44,7 @@ public class NatsEntityListener {
 
     private Timer timer;
     private long shard;
+    private boolean enabled;
 
     @PostConstruct
     void init() {
@@ -52,9 +53,13 @@ public class NatsEntityListener {
                 .tag("type", "topicmessage")
                 .register(meterRegistry);
         shard = mirrorProperties.getShard(); // Cache to avoid reflection penalty
+        enabled = mirrorProperties.isNats();
     }
 
     public void onTopicMessage(TopicMessage topicMessage) throws ImporterException {
+        if (!enabled) {
+            return;
+        }
         String subject = String.format("topic.%d.%d.%d", shard, topicMessage.getRealmNum(), topicMessage.getTopicNum());
 
         try {

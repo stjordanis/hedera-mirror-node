@@ -44,6 +44,8 @@ public class MirrorProperties {
 
     private Path initialAddressBook;
 
+    private boolean nats = true;
+
     @NotNull
     private Instant verifyHashAfter = Instant.parse("1970-01-01T00:00:00Z");
 

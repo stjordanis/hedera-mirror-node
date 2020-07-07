@@ -49,6 +49,7 @@ public class ListenerProperties {
 
     public enum ListenerType {
         NATS,
+        NOTIFY,
         POLL,
         SHARED_POLL
     }
