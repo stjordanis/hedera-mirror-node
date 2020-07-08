@@ -35,7 +35,7 @@ import com.hedera.mirror.importer.domain.TopicMessage;
 @Log4j2
 @Named
 @RequiredArgsConstructor
-public class NatsEntityListener {
+public class PublishingEntityListener {
 
     private final MirrorProperties mirrorProperties;
     private final ObjectMapper objectMapper;
@@ -55,6 +55,7 @@ public class NatsEntityListener {
                 .register(meterRegistry);
         shard = mirrorProperties.getShard(); // Cache to avoid reflection penalty
         publisher = mirrorProperties.getPublisher();
+        log.info("Configured to publish to {}", publisher);
     }
 
     public void onTopicMessage(TopicMessage topicMessage) {
@@ -74,6 +75,7 @@ public class NatsEntityListener {
         try {
             byte[] bytes = objectMapper.writeValueAsBytes(topicMessage);
             timer.record(() -> connection.get().publish(subject, bytes));
+            log.trace("Published topic message to {}: {}", connection.get().getConnectedUrl(), topicMessage);
         } catch (Exception e) {
             log.error("Unable to publish to subject {} via {}", subject, connection.get().getConnectedUrl(), e);
         }
@@ -84,6 +86,7 @@ public class NatsEntityListener {
 
         try {
             timer.record(() -> redisTemplate.convertAndSend(channel, topicMessage));
+            log.trace("Published topic message to Redis: {}", topicMessage);
         } catch (Exception e) {
             log.error("Unable to publish to redis {}", channel, e);
         }

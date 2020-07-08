@@ -52,7 +52,7 @@ import com.hedera.mirror.importer.parser.domain.StreamFileData;
 import com.hedera.mirror.importer.parser.record.RecordStreamFileListener;
 import com.hedera.mirror.importer.parser.record.entity.ConditionOnEntityRecordParser;
 import com.hedera.mirror.importer.parser.record.entity.EntityListener;
-import com.hedera.mirror.importer.parser.record.entity.nats.NatsEntityListener;
+import com.hedera.mirror.importer.parser.record.entity.nats.PublishingEntityListener;
 import com.hedera.mirror.importer.repository.RecordFileRepository;
 
 @Log4j2
@@ -63,7 +63,7 @@ public class SqlEntityListener implements EntityListener, RecordStreamFileListen
     private final SqlProperties properties;
     private final DataSource dataSource;
     private final RecordFileRepository recordFileRepository;
-    private final NatsEntityListener natsEntityListener;
+    private final PublishingEntityListener publishingEntityListener;
 
     private long batch_count = 0;
     // Keeps track of entityIds seen in the current file being processed. This is for optimizing inserts into
@@ -199,7 +199,7 @@ public class SqlEntityListener implements EntityListener, RecordStreamFileListen
                             "claims: {}, topic messages: {}, non-fee transfers: {}",
                     transactions, entityIds, transferLists, fileData, contractResult, liveHashes, topicMessages,
                     nonFeeTransfers);
-            this.topicMessages.forEach(natsEntityListener::onTopicMessage);
+            this.topicMessages.forEach(publishingEntityListener::onTopicMessage);
             this.topicMessages.clear();
         } catch (SQLException e) {
             log.error("Error committing sql insert batch ", e);

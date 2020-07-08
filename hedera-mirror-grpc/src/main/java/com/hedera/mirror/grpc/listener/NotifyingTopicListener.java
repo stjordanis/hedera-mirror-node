@@ -24,6 +24,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.PropertyNamingStrategy;
 import io.vertx.core.Vertx;
 import io.vertx.pgclient.PgConnectOptions;
+import io.vertx.pgclient.PgConnection;
 import io.vertx.pgclient.pubsub.PgSubscriber;
 import javax.inject.Named;
 import lombok.extern.log4j.Log4j2;
@@ -63,23 +64,27 @@ public class NotifyingTopicListener implements TopicListener {
         EmitterProcessor<String> emitterProcessor = EmitterProcessor.create();
 
         subscriber.connect(connectResult -> {
-            if (!connectResult.succeeded()) {
+            PgConnection connection = subscriber.actualConnection();
+
+            if (!connectResult.succeeded() || connection == null) {
                 throw new RuntimeException(connectResult.cause());
             }
 
-            subscriber.actualConnection().notificationHandler(notificationResult -> {
+            connection.notificationHandler(notificationResult -> {
                 emitterProcessor.onNext(notificationResult.getPayload());
             });
 
-            subscriber.actualConnection()
-                    .query("LISTEN topic_message")
+            connection.query("LISTEN topic_message")
                     .execute(result -> log.info("Listening for messages"));
         });
 
-        return emitterProcessor.doFinally(s ->
+        return emitterProcessor.doFinally(s -> {
+            if (subscriber.actualConnection() != null) {
                 subscriber.actualConnection()
                         .query("UNLISTEN topic_message")
-                        .execute(result -> log.info("Cancelling listen")))
+                        .execute(result -> log.info("Cancelling listen"));
+            }
+        })
                 .doFinally(s -> subscriber.close());
     }
 
